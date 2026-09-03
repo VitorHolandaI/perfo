@@ -132,11 +132,13 @@ fn short_bytes(bytes: u64) -> String {
     }
 }
 
+/// Shorten to AT MOST `max` chars (ellipsis included), so callers can use
+/// it inside fixed-width table cells without breaking alignment.
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        let mut t: String = s.chars().take(max).collect();
+        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
         t.push('…');
         t
     }
@@ -196,31 +198,37 @@ fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
 }
 
 pub fn draw(frame: &mut Frame, ui: &Ui) {
+    // The focused window owns the whole terminal; only the status line and
+    // help overlay share it.
+    let [body, status_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+    match ui.pane {
+        Pane::Cpu => draw_cpu_pane(frame, body, ui),
+        Pane::Io => draw_io(frame, body, ui),
+        Pane::Net => draw_net(frame, body, ui),
+        Pane::Procs => draw_processes(frame, body, ui),
+    }
+    draw_status(frame, status_area, ui);
+    if ui.help {
+        draw_help(frame, frame.area(), ui);
+    }
+}
+
+/// Fullscreen CPU window: the core grid, then memory + disks side by side.
+fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
-    let [cpu_area, mid_area, proc_area, status_area] = Layout::vertical([
+    let [cpu_area, mid_area, _rest] = Layout::vertical([
         Constraint::Length(6 + core_lines as u16),
         Constraint::Length(7),
         Constraint::Min(0),
-        Constraint::Length(1),
     ])
-    .areas(frame.area());
+    .areas(area);
     draw_cpu(frame, cpu_area, ui);
     let [mem_area, disk_area] =
         Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
             .areas(mid_area);
     draw_mem(frame, mem_area, ui);
     draw_disks(frame, disk_area, ui);
-    if ui.pane == Pane::Io {
-        draw_io(frame, proc_area, ui);
-    } else if ui.pane == Pane::Net {
-        draw_net(frame, proc_area, ui);
-    } else {
-        draw_processes(frame, proc_area, ui);
-    }
-    draw_status(frame, status_area, ui);
-    if ui.help {
-        draw_help(frame, frame.area(), ui);
-    }
 }
 
 fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
@@ -235,8 +243,8 @@ fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
 
 fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
     let title = match ui.core_filter {
-        Some(c) => format!("CPU — core {c}"),
-        None => "CPU".to_string(),
+        Some(c) => format!("1:CPU — core {c}"),
+        None => "1:CPU".to_string(),
     };
     let focused = ui.pane == Pane::Cpu;
     frame.render_widget(block(&title, focused, &ui.theme), area);
@@ -505,7 +513,7 @@ fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
 /// columns, then the top processes actually moving data.
 fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     let focused = ui.pane == Pane::Io;
-    let block = block("IO", focused, &ui.theme);
+    let block = block("2:IO", focused, &ui.theme);
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
     let disks = unique_disks(&ui.snap.disks);
@@ -686,28 +694,33 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
 
 /// Full-pane network view (Tab -> NET): per-interface rx/tx rates and
 /// packet/error/drop counters plus TCP retransmissions and connections.
+///
+/// Column cells (fixed): IFACE(10) | RX/s(9) | TX/s(9) | PPS(17) |
+/// ERR/DROP(13) | LINK(14). The legend line uses the SAME cell widths so
+/// every `│` lines up across the three rows.
 fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
     let focused = ui.pane == Pane::Net;
-    let block = block("NET", focused, &ui.theme);
+    let block = block("3:NET", focused, &ui.theme);
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
     let totals = &ui.snap.net.totals;
     let pipe = |s: &str| Span::styled(s.to_string(), Style::default().fg(ui.theme.muted));
 
     let mut lines = vec![Line::from(vec![
+        pipe(&format!(" {:<9}", "NET")),
         pipe("│"),
         Span::styled(
-            format!(" rx {:>8}/s", short_bytes(totals.rx_bps)),
+            format!("{:>9}", format!("rx {}/s", short_bytes(totals.rx_bps))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            format!(" tx {:>8}/s", short_bytes(totals.tx_bps)),
+            format!("{:>9}", format!("tx {}/s", short_bytes(totals.tx_bps))),
             Style::default().fg(ui.theme.yellow),
         ),
         pipe("│"),
         Span::styled(
-            format!(" tcp retrans {:>4}/s", totals.tcp_retrans_s),
+            format!("{:>17}", format!("tcp retrans {}/s", totals.tcp_retrans_s)),
             Style::default().fg(if totals.tcp_retrans_s > 0 {
                 ui.theme.red
             } else {
@@ -716,7 +729,7 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
         ),
         pipe("│"),
         Span::styled(
-            format!(" {:>4} conexoes", totals.tcp_established),
+            format!("{:>13}", format!("{} conexoes", totals.tcp_established)),
             Style::default().fg(ui.theme.fg),
         ),
         pipe("│"),
@@ -729,15 +742,11 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
         pipe("│"),
         pipe(&format!("{:>9}", "TX/s")),
         pipe("│"),
-        pipe(&format!("{:>7}", "rx pps")),
+        pipe(&format!("{:>17}", "rx pps / tx pps")),
         pipe("│"),
-        pipe(&format!("{:>7}", "tx pps")),
+        pipe(&format!("{:>13}", "err / drop")),
         pipe("│"),
-        pipe(&format!("{:>5}", "err")),
-        pipe("│"),
-        pipe(&format!("{:>5}", "drop")),
-        pipe("│"),
-        pipe(&format!("{:>10}", "LINK")),
+        pipe(&format!("{:>14}", "LINK")),
     ]));
     for i in &ui.snap.net.ifaces {
         let link = match (i.link_mbps, i.link_up) {
@@ -746,12 +755,9 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             (None, true) => "up".to_string(),
             (None, false) => "-".to_string(),
         };
-        let err_color = if i.rx_errs_s + i.tx_errs_s > 0 {
-            ui.theme.red
-        } else {
-            ui.theme.muted
-        };
-        let drop_color = if i.rx_drops_s + i.tx_drops_s > 0 {
+        let errs = i.rx_errs_s + i.tx_errs_s;
+        let drops = i.rx_drops_s + i.tx_drops_s;
+        let bad_color = if errs + drops > 0 {
             ui.theme.red
         } else {
             ui.theme.muted
@@ -772,21 +778,17 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
                 Style::default().fg(ui.theme.yellow),
             ),
             pipe("│"),
-            Span::styled(format!("{:>7}", i.rx_pps), Style::default().fg(ui.theme.fg)),
-            pipe("│"),
-            Span::styled(format!("{:>7}", i.tx_pps), Style::default().fg(ui.theme.fg)),
-            pipe("│"),
             Span::styled(
-                format!("{:>5}", i.rx_errs_s + i.tx_errs_s),
-                Style::default().fg(err_color),
+                format!("{:>17}", format!("rx {} tx {}", i.rx_pps, i.tx_pps)),
+                Style::default().fg(ui.theme.fg),
             ),
             pipe("│"),
             Span::styled(
-                format!("{:>5}", i.rx_drops_s + i.tx_drops_s),
-                Style::default().fg(drop_color),
+                format!("{:>13}", format!("{} err {} drop", errs, drops)),
+                Style::default().fg(bad_color),
             ),
             pipe("│"),
-            Span::styled(format!("{:>10}", link), Style::default().fg(ui.theme.fg)),
+            Span::styled(format!("{:>14}", link), Style::default().fg(ui.theme.fg)),
         ]));
     }
     frame.render_widget(Paragraph::new(lines), inner);
@@ -839,11 +841,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         draw_trace(frame, area, ui);
         return;
     }
-    let title = if ui.tree {
-        "Processes (tree)"
-    } else {
-        "Processes"
-    };
+    let title = if ui.tree { "4:PROCS (tree)" } else { "4:PROCS" };
     let focused = ui.pane == Pane::Procs;
     frame.render_widget(block(title, focused, &ui.theme), area);
     let inner = block(title, focused, &ui.theme).inner(area);
@@ -993,8 +991,9 @@ mod tests {
 
     #[test]
     fn truncate_ellipsizes_long_strings() {
-        assert_eq!(truncate("hello world", 5), "hello…");
-        assert_eq!(truncate("日本語テキスト", 3), "日本語…");
+        assert_eq!(truncate("hello world", 5), "hell…");
+        assert_eq!(truncate("日本語テキスト", 3), "日本…");
+        assert_eq!(truncate("exactly-nine", 9), "exactly-…");
     }
 
     #[test]

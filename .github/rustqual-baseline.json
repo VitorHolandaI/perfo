@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.07345556813616261,
-  "iosp_score": 0.9694656488549618,
+  "quality_score": 0.07366666666666688,
+  "iosp_score": 0.9696969696969697,
   "violations": 4,
-  "total": 209,
+  "total": 210,
   "complexity_warnings": 7,
   "magic_number_warnings": 94,
   "nesting_depth_warnings": 3,
@@ -14,7 +14,7 @@
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
-  "boilerplate_warnings": 1,
+  "boilerplate_warnings": 2,
   "srp_struct_warnings": 0,
   "srp_module_warnings": 7,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 155,
+  "total_findings": 156,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
