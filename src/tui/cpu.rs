@@ -1,0 +1,923 @@
+use ratatui::{
+    layout::{Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row as TableRow, Table, TableState},
+    Frame,
+};
+
+use crate::data::cpu::{CoreType, CpuSnapshot, ProcessInfo};
+use crate::theme::Theme;
+
+/// Core/frequency color thresholds (percentages).
+const HOT_PCT: f32 = 80.0;
+const WARN_PCT: f32 = 50.0;
+/// Frequency ratio thresholds (of the core's own max).
+const FREQ_HIGH_RATIO: f32 = 0.66;
+const FREQ_MID_RATIO: f32 = 0.33;
+/// Disk bar thresholds (percentages).
+const DISK_HOT_PCT: f32 = 85.0;
+const DISK_WARN_PCT: f32 = 70.0;
+/// Cap on rendered core rows (defensive against huge machines).
+const MAX_CORE_ROWS: usize = 64;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SortKey {
+    Cpu,
+    Mem,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Cpu,
+    Io,
+    Procs,
+}
+
+pub struct Row<'a> {
+    pub depth: usize,
+    pub process: &'a ProcessInfo,
+}
+
+pub struct Ui<'a> {
+    pub snap: &'a CpuSnapshot,
+    pub rows: &'a [Row<'a>],
+    pub selected: Option<usize>,
+    pub core_focus: usize,
+    pub core_filter: Option<usize>,
+    pub sort: SortKey,
+    pub invert: bool,
+    pub full_cmd: bool,
+    pub tree: bool,
+    pub pane: Pane,
+    pub theme: Theme,
+    pub help: bool,
+    pub help_page: usize,
+    pub tracing: bool,
+    pub trace_lines: Option<&'a std::collections::VecDeque<String>>,
+    pub trace_pid: Option<u32>,
+    pub status: &'a str,
+    pub searching: bool,
+    pub kill_prompt: bool,
+}
+
+fn cpu_color(v: f32, theme: &Theme) -> Color {
+    if v >= HOT_PCT {
+        theme.red
+    } else if v >= WARN_PCT {
+        theme.yellow
+    } else {
+        theme.green
+    }
+}
+
+fn bar(value: f32, width: usize) -> String {
+    let filled = ((value / 100.0) * width as f32).round() as usize;
+    let filled = filled.min(width);
+    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+}
+
+fn ghz(f: u64) -> String {
+    if f >= 1000 {
+        format!("{:.1}G", f as f32 / 1000.0)
+    } else {
+        format!("{f}M")
+    }
+}
+
+/// GHz relative to the core's own max frequency: red near the limit,
+/// yellow mid, green comfortably below.
+fn freq_color(freq: u64, max: u64, theme: &Theme) -> Color {
+    if max == 0 {
+        return theme.muted;
+    }
+    let ratio = freq as f32 / max as f32;
+    if ratio >= FREQ_HIGH_RATIO {
+        theme.red
+    } else if ratio >= FREQ_MID_RATIO {
+        theme.yellow
+    } else {
+        theme.green
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1}{}", UNITS[unit])
+}
+
+/// Compact size: 8.3G, 535M, 20K.
+fn short_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "K", "M", "G"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if value >= 10.0 {
+        format!("{value:.0}{}", UNITS[unit])
+    } else {
+        format!("{value:.1}{}", UNITS[unit])
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(max).collect();
+        t.push('…');
+        t
+    }
+}
+
+/// Disks with distinct device names, in mount order, capped at 5. btrfs
+/// subvolumes share one device and would otherwise render as duplicate bars.
+fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk::DiskInfo> {
+    let mut seen = std::collections::HashSet::new();
+    disks.iter().filter(|d| seen.insert(d.name.clone())).take(5).collect()
+}
+
+/// Rate bar scaled against the busiest disk of this sample.
+fn rate_bar(bps: u64, max_bps: u64, width: usize) -> String {
+    let ratio = if max_bps > 0 { bps as f32 / max_bps as f32 } else { 0.0 };
+    let filled = ((ratio * width as f32).round() as usize).min(width);
+    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+}
+
+pub fn draw(frame: &mut Frame, ui: &Ui) {
+    let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
+    let [cpu_area, mid_area, proc_area, status_area] = Layout::vertical([
+        Constraint::Length(6 + core_lines as u16),
+        Constraint::Length(7),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(frame.area());
+    draw_cpu(frame, cpu_area, ui);
+    let [mem_area, disk_area] = Layout::horizontal([
+        Constraint::Percentage(42),
+        Constraint::Percentage(58),
+    ])
+    .areas(mid_area);
+    draw_mem(frame, mem_area, ui);
+    draw_disks(frame, disk_area, ui);
+    if ui.pane == Pane::Io {
+        draw_io(frame, proc_area, ui);
+    } else {
+        draw_processes(frame, proc_area, ui);
+    }
+    draw_status(frame, status_area, ui);
+    if ui.help {
+        draw_help(frame, frame.area(), ui);
+    }
+}
+
+fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
+    let mut b = Block::default()
+        .title(format!(" {title} "))
+        .borders(Borders::ALL);
+    if focused {
+        b = b.border_style(Style::default().fg(theme.accent));
+    }
+    b
+}
+
+fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let title = match ui.core_filter {
+        Some(c) => format!("CPU — core {c}"),
+        None => "CPU".to_string(),
+    };
+    let focused = ui.pane == Pane::Cpu;
+    frame.render_widget(block(&title, focused, &ui.theme), area);
+    let inner = block(&title, focused, &ui.theme).inner(area);
+    let [overall_area, cores_area] =
+        Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).areas(inner);
+
+    let bar_w = overall_area.width.saturating_sub(26) as usize;
+    let color = cpu_color(ui.snap.overall_percent, &ui.theme);
+    let overall = Line::from(vec![
+        Span::styled(
+            "overall ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            bar(ui.snap.overall_percent, bar_w),
+            Style::default().fg(color),
+        ),
+        Span::styled(
+            format!(" {:>5.1}%", ui.snap.overall_percent),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    let la = ui.snap.load_avg;
+    let temp = match ui.snap.cpu_temp_c {
+        Some(t) => format!("    cpu {t:.0}\u{00B0}C"),
+        None => String::new(),
+    };
+    let mem = format!(
+        "load {:.2} {:.2} {:.2}    mem {}/{}    iowait {:.1}%",
+        la[0],
+        la[1],
+        la[2],
+        human_bytes(ui.snap.used_mem_bytes),
+        human_bytes(ui.snap.total_mem_bytes),
+        ui.snap.iowait_percent
+    );
+    let legend = Line::from(vec![
+        Span::styled("P ", Style::default().fg(ui.theme.accent)),
+        Span::styled("performance   ", Style::default().fg(ui.theme.muted)),
+        Span::styled("E ", Style::default().fg(ui.theme.green)),
+        Span::styled("efficient   ", Style::default().fg(ui.theme.muted)),
+        Span::styled("L ", Style::default().fg(ui.theme.red)),
+        Span::styled("low-power", Style::default().fg(ui.theme.muted)),
+    ]);
+    frame.render_widget(
+        Paragraph::new(vec![
+            overall,
+            Line::from(Span::raw(format!("{mem}{temp}"))),
+            legend,
+        ]),
+        overall_area,
+    );
+
+    let n = ui.snap.per_core.len().min(MAX_CORE_ROWS);
+    let two_per_line = cores_area.width >= 60;
+    let bar_w = if two_per_line {
+        (cores_area.width.saturating_sub(1) / 2).saturating_sub(25) as usize
+    } else {
+        cores_area.width.saturating_sub(29) as usize
+    };
+    let bar_w = bar_w.max(1);
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let mut spans: Vec<Span> = Vec::new();
+        for slot in 0..2 {
+            if i >= n {
+                break;
+            }
+            let usage = ui.snap.per_core[i];
+            let letter = ui
+                .snap
+                .per_core_types
+                .get(i)
+                .map(|t| t.letter())
+                .unwrap_or('?');
+            let focused_core = i == ui.core_focus;
+            let mut st = Style::default();
+            if focused_core {
+                st = st.bg(ui.theme.selection).add_modifier(Modifier::BOLD);
+            }
+            if two_per_line && slot == 1 {
+                spans.push(Span::raw("  "));
+            }
+            let type_color = match ui.snap.per_core_types.get(i) {
+                Some(CoreType::P) => ui.theme.accent,
+                Some(CoreType::E) => ui.theme.green,
+                Some(CoreType::Lpe) => ui.theme.red,
+                _ => ui.theme.muted,
+            };
+            let freq = ghz(ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0));
+            let max = ui.snap.per_core_max_freq_mhz.get(i).copied().unwrap_or(0);
+            let freq_c = freq_color(
+                ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0),
+                max,
+                &ui.theme,
+            );
+            let temp = match ui.snap.per_core_temp_c.get(i).copied().flatten() {
+                Some(t) => format!(" {t:.0}\u{00B0}"),
+                None => String::new(),
+            };
+            spans.push(Span::styled(
+                format!("{:>2}{} ", i, letter),
+                st.fg(type_color),
+            ));
+            spans.push(Span::styled(bar(usage, bar_w), st.fg(cpu_color(usage, &ui.theme))));
+            let value_fg = if focused_core { ui.theme.fg } else { ui.theme.muted };
+            spans.push(Span::styled(
+                format!(" {:>5.1}%", usage),
+                st.fg(value_fg),
+            ));
+            spans.push(Span::styled(format!(" {freq}"), st.fg(freq_c)));
+            spans.push(Span::styled(temp, st.fg(type_color)));
+            i += 1;
+        }
+        lines.push(Line::from(spans));
+    }
+    frame.render_widget(Paragraph::new(lines), cores_area);
+}
+
+fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let focused = ui.pane == Pane::Cpu;
+    frame.render_widget(block("MEM", focused, &ui.theme), area);
+    let inner = block("MEM", focused, &ui.theme).inner(area);
+    let m = &ui.snap.mem;
+    let w = inner.width as usize;
+    let bar_w = w.saturating_sub(8);
+    let frac = |x: u64| (x as f64 / m.total.max(1) as f64 * bar_w as f64) as usize;
+
+    let used_w = frac(m.used);
+    let cache_w = frac(m.cache);
+    let buf_w = frac(m.buffers);
+    let free_w = bar_w.saturating_sub(used_w + cache_w + buf_w);
+    let pct = m.used as f32 / m.total.max(1) as f32 * 100.0;
+
+    let bar_line = Line::from(vec![
+        Span::styled("█".repeat(used_w), Style::default().fg(ui.theme.green)),
+        Span::styled("█".repeat(cache_w), Style::default().fg(ui.theme.yellow)),
+        Span::styled("█".repeat(buf_w), Style::default().fg(ui.theme.accent)),
+        Span::styled("░".repeat(free_w), Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            format!(" {:>4.0}%", pct),
+            Style::default().add_modifier(Modifier::BOLD).fg(ui.theme.fg),
+        ),
+    ]);
+
+    let detail = format!(
+        "used {}  cache {}  buf {}  free {}",
+        short_bytes(m.used),
+        short_bytes(m.cache),
+        short_bytes(m.buffers),
+        short_bytes(m.free)
+    );
+
+    let swap_line = if m.swap_total > 0 {
+        let swap_used_w = (m.swap_used as f64 / m.swap_total as f64 * bar_w as f64) as usize;
+        let swap_pct = m.swap_used as f32 / m.swap_total as f32 * 100.0;
+        Line::from(vec![
+            Span::styled("swap ", Style::default().fg(ui.theme.muted)),
+            Span::styled("█".repeat(swap_used_w), Style::default().fg(ui.theme.yellow)),
+            Span::styled(
+                "░".repeat(bar_w.saturating_sub(swap_used_w)),
+                Style::default().fg(ui.theme.muted),
+            ),
+            Span::styled(
+                format!(
+                    " {:>4.0}% {}/{}",
+                    swap_pct,
+                    short_bytes(m.swap_used),
+                    short_bytes(m.swap_total)
+                ),
+                Style::default().fg(ui.theme.muted),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled("swap: off", Style::default().fg(ui.theme.muted)))
+    };
+
+    let psi_color = if m.psi_some_10 > 10.0 {
+        ui.theme.red
+    } else if m.psi_some_10 > 5.0 {
+        ui.theme.yellow
+    } else {
+        ui.theme.green
+    };
+    let psi_line = Line::from(vec![
+        Span::styled("psi ", Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            format!("{:.1} {:.1} {:.1}%", m.psi_some_10, m.psi_some_60, m.psi_some_300),
+            Style::default().fg(psi_color),
+        ),
+    ]);
+
+    frame.render_widget(
+        Paragraph::new(vec![bar_line, Line::from(Span::raw(detail)), swap_line, psi_line]),
+        inner,
+    );
+}
+
+fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
+    frame.render_widget(block("Disks", false, &ui.theme), area);
+    let inner = block("Disks", false, &ui.theme).inner(area);
+    let mut lines: Vec<Line> = Vec::new();
+    let w = inner.width as usize;
+    // name(12) + 1 + bar + pct(18) + 2 + mount(12)
+    let bar_w = w.saturating_sub(45);
+    for d in unique_disks(&ui.snap.disks) {
+        let color = if d.percent >= DISK_HOT_PCT {
+            ui.theme.red
+        } else if d.percent >= DISK_WARN_PCT {
+            ui.theme.yellow
+        } else {
+            ui.theme.green
+        };
+        let filled = ((d.percent / 100.0) * bar_w as f32).round() as usize;
+        let filled = filled.min(bar_w);
+        let name = d.name.rsplit('/').next().unwrap_or(&d.name);
+        let mount = truncate(&d.mount, 12);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<11} ", truncate(name, 11)),
+                Style::default().fg(ui.theme.muted),
+            ),
+            Span::styled("█".repeat(filled), Style::default().fg(color)),
+            Span::styled("░".repeat(bar_w - filled), Style::default().fg(ui.theme.muted)),
+            Span::styled(
+                format!(" {:>3.0}% {:>5}/{}", d.percent, short_bytes(d.used_bytes), short_bytes(d.total_bytes)),
+                Style::default().fg(ui.theme.muted),
+            ),
+            Span::styled(format!("  {mount}"), Style::default().fg(ui.theme.fg)),
+        ]));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Full-pane disk I/O view (Tab -> IO): PSI pressure, per-disk iostat-style
+/// columns, then the top processes actually moving data.
+fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let focused = ui.pane == Pane::Io;
+    let block = block("IO", focused, &ui.theme);
+    frame.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+    let disks = unique_disks(&ui.snap.disks);
+    let max_rate = disks.iter().map(|d| d.read_bps.max(d.write_bps)).max().unwrap_or(0);
+    let total_r: u64 = disks.iter().map(|d| d.read_bps).sum();
+    let total_w: u64 = disks.iter().map(|d| d.write_bps).sum();
+
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!(
+                "io pressure {:>4.1} {:>4.1} {:>4.1}%   ",
+                ui.snap.io_pressure_some[0],
+                ui.snap.io_pressure_some[1],
+                ui.snap.io_pressure_some[2]
+            ),
+            Style::default().fg(io_pressure_color(ui.snap.io_pressure_some[0], &ui.theme)),
+        ),
+        Span::styled(
+            format!(
+                "read {:>7}/s   write {:>7}/s",
+                short_bytes(total_r),
+                short_bytes(total_w)
+            ),
+            Style::default().fg(ui.theme.accent),
+        ),
+        Span::styled("   (taxas desde o ultimo refresh)", Style::default().fg(ui.theme.muted)),
+    ])];
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(
+                "{:<11}{:>6}{:>7}{:>6}{:>7}{:>5}{:>5}  {:<5}{:>8}{:>10}  {:<6}{:>8}{:>10}  MOUNT",
+                "DISK", "r/s", "r_awt", "w/s", "w_awt", "fila", "busy", "READ", "", "RATE/s", "WRITE", "", "RATE/s"
+            ),
+            Style::default().fg(ui.theme.muted),
+        ),
+    ]));
+    for d in disks {
+        let mount = truncate(&d.mount, 12);
+        let name = truncate(d.name.rsplit('/').next().unwrap_or(&d.name), 11);
+        lines.push(Line::from(vec![
+            Span::styled(format!("{name:<11}"), Style::default().fg(ui.theme.muted)),
+            Span::styled(format!("{:>6}", d.io.r_s), Style::default().fg(ui.theme.fg)),
+            Span::styled(format!("{:>6.1}ms", d.io.r_await_ms), Style::default().fg(await_color(d.io.r_await_ms, &ui.theme))),
+            Span::styled(format!("{:>6}", d.io.w_s), Style::default().fg(ui.theme.fg)),
+            Span::styled(format!("{:>6.1}ms", d.io.w_await_ms), Style::default().fg(await_color(d.io.w_await_ms, &ui.theme))),
+            Span::styled(format!("{:>5.1}", d.io.queue_avg), Style::default().fg(queue_color(d.io.queue_avg, &ui.theme))),
+            Span::styled(format!("{:>4.0}%", d.io.busy_pct), Style::default().fg(busy_color(d.io.busy_pct, &ui.theme))),
+            Span::styled("  read ", Style::default().fg(ui.theme.muted)),
+            Span::styled(rate_bar(d.read_bps, max_rate, 8), Style::default().fg(ui.theme.accent)),
+            Span::styled(format!(" {:>7}/s", short_bytes(d.read_bps)), Style::default().fg(ui.theme.fg)),
+            Span::styled("  write ", Style::default().fg(ui.theme.muted)),
+            Span::styled(rate_bar(d.write_bps, max_rate, 8), Style::default().fg(ui.theme.yellow)),
+            Span::styled(format!(" {:>7}/s", short_bytes(d.write_bps)), Style::default().fg(ui.theme.fg)),
+            Span::styled(format!("  {mount}"), Style::default().fg(ui.theme.fg)),
+        ]));
+    }
+
+    // Top processes by actual storage I/O (iotop-style, own processes only).
+    let mut by_io: Vec<&ProcessInfo> = ui
+        .snap
+        .processes
+        .iter()
+        .filter(|p| p.read_bps > 0 || p.write_bps > 0)
+        .collect();
+    by_io.sort_by(|a, b| (b.read_bps + b.write_bps).cmp(&(a.read_bps + a.write_bps)));
+    if !by_io.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "PROCESSOS COM I/O ATIVO (quem esta martelando o disco)",
+            Style::default().fg(ui.theme.accent),
+        )));
+        for p in by_io.iter().take(6) {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<11}", truncate(&p.user, 11)),
+                    Style::default().fg(ui.theme.muted),
+                ),
+                Span::styled(
+                    format!("read {:>7}/s  write {:>7}/s  ", short_bytes(p.read_bps), short_bytes(p.write_bps)),
+                    Style::default().fg(ui.theme.fg),
+                ),
+                Span::styled(
+                    truncate(&p.cmd, inner.width.saturating_sub(40) as usize),
+                    Style::default().fg(ui.theme.fg),
+                ),
+            ]));
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Latency color: green < 2ms, yellow < 10ms, red >= 10ms (NVMe health
+/// line sits below 1ms; 10ms+ means the queue is backing up).
+fn await_color(ms: f32, theme: &Theme) -> Color {
+    if ms >= 10.0 {
+        theme.red
+    } else if ms >= 2.0 {
+        theme.yellow
+    } else {
+        theme.green
+    }
+}
+
+/// Queue depth: green < 2, yellow < 8, red >= 8.
+fn queue_color(q: f32, theme: &Theme) -> Color {
+    if q >= 8.0 {
+        theme.red
+    } else if q >= 2.0 {
+        theme.yellow
+    } else {
+        theme.green
+    }
+}
+
+/// Busy%: red only past 90 (remember: on NVMe this is not saturation).
+fn busy_color(pct: f32, theme: &Theme) -> Color {
+    if pct >= 90.0 {
+        theme.yellow
+    } else {
+        theme.muted
+    }
+}
+
+fn io_pressure_color(p10: f64, theme: &Theme) -> Color {
+    if p10 >= 10.0 {
+        theme.red
+    } else if p10 >= 5.0 {
+        theme.yellow
+    } else {
+        theme.green
+    }
+}
+
+fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
+    if ui.tracing {
+        draw_trace(frame, area, ui);
+        return;
+    }
+    let title = if ui.tree { "Processes (tree)" } else { "Processes" };
+    let focused = ui.pane == Pane::Procs;
+    frame.render_widget(block(title, focused, &ui.theme), area);
+    let inner = block(title, focused, &ui.theme).inner(area);
+
+    let widths = [
+        Constraint::Length(8),
+        Constraint::Length(12),
+        Constraint::Length(8),
+        Constraint::Length(9),
+        Constraint::Min(10),
+    ];
+
+    let arrow = if ui.invert { "↓" } else { "↑" };
+    let cpu_hdr = if ui.sort == SortKey::Cpu {
+        format!("CPU%{arrow}")
+    } else {
+        "CPU%".to_string()
+    };
+    let mem_hdr = if ui.sort == SortKey::Mem {
+        format!("MEM{arrow}")
+    } else {
+        "MEM".to_string()
+    };
+    let header = TableRow::new(vec![
+        Cell::from("PID"),
+        Cell::from("USER"),
+        Cell::from(cpu_hdr),
+        Cell::from(mem_hdr),
+        Cell::from("COMMAND"),
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD).fg(ui.theme.fg));
+
+    let rows: Vec<TableRow> = ui
+        .rows
+        .iter()
+        .map(|r| {
+            let indent = if ui.tree {
+                format!("{}▸ ", "  ".repeat(r.depth.min(20)))
+            } else {
+                String::new()
+            };
+            let cmd = if ui.full_cmd {
+                truncate(&r.process.cmd, 200)
+            } else {
+                truncate(&r.process.cmd, 40)
+            };
+            TableRow::new(vec![
+                Cell::from(r.process.pid.to_string()),
+                Cell::from(r.process.user.as_str()),
+                Cell::from(format!("{:.1}", r.process.cpu_percent)),
+                Cell::from(human_bytes(r.process.mem_bytes)),
+                Cell::from(format!("{indent}{cmd}")),
+            ])
+        })
+        .collect();
+
+    let mut ts = TableState::default();
+    ts.select(ui.selected);
+    let table = Table::new(rows, widths)
+        .header(header)
+        .column_spacing(1)
+        .row_highlight_style(Style::default().bg(ui.theme.selection))
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(table, inner, &mut ts);
+}
+
+fn draw_trace(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let title = match ui.trace_pid.and_then(|p| ui.snap.processes.iter().find(|x| x.pid == p)) {
+        Some(proc) => format!("TRACE {} {}", proc.pid, truncate(&proc.cmd, 50)),
+        None => format!("TRACE {}", ui.trace_pid.unwrap_or(0)),
+    };
+    let focused = ui.pane == Pane::Procs;
+    frame.render_widget(block(&title, focused, &ui.theme), area);
+    let inner = block(&title, focused, &ui.theme).inner(area);
+    let lines: Vec<Line> = match ui.trace_lines {
+        Some(ls) => ls
+            .iter()
+            .take(inner.height as usize)
+            .map(|l| Line::from(Span::raw(l.clone())))
+            .collect(),
+        None => vec![Line::from(Span::raw("starting trace..."))],
+    };
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn draw_status(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let color = if ui.searching {
+        ui.theme.yellow
+    } else if ui.kill_prompt {
+        ui.theme.red
+    } else {
+        ui.theme.fg
+    };
+    frame.render_widget(
+        Paragraph::new(ui.status.to_string()).style(Style::default().fg(color)),
+        area,
+    );
+}
+
+fn draw_help(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let (title, text): (&str, Vec<Line>) = match ui.help_page {
+        0 => (
+            "help 1/5 — teclas",
+            vec![
+                Line::from(Span::styled(
+                    "PAINEIS (Tab alterna)",
+                    Style::default().fg(ui.theme.accent),
+                )),
+                Line::from("  CPU:  setas movem o nucleo focado, Enter mostra"),
+                Line::from("    so os processos daquele nucleo, Esc volta pra todos"),
+                Line::from("  IO:   taxas, IOPS, latencia e fila por disco (pagina 5 = o que"),
+                Line::from("    cada stat significa e bons valores)"),
+                Line::from("  Processos:      setas selecionam, PgUp/PgDn/Home/End"),
+                Line::from(""),
+                Line::from(Span::styled("ACOES", Style::default().fg(ui.theme.accent))),
+                Line::from("  q  sair      z  pause (congela updates)   s  trace syscalls"),
+                Line::from("  k  kill (1=SIGTERM 9=SIGKILL 0=cancel)   C  tema de cor"),
+                Line::from("  p/m  sort CPU/MEM   i  inverte a ordem   c  comando completo"),
+                Line::from("  t  arvore   H  threads   K  kernel   /  busca"),
+                Line::from(""),
+                Line::from(Span::styled("NAVEGACAO DO HELP", Style::default().fg(ui.theme.accent))),
+                Line::from("  n/p (ou PgUp/PgDn): proxima/anterior pagina    ? ou q: fecha"),
+            ],
+        ),
+        1 => (
+            "help 2/5 — bloco CPU",
+            vec![
+                Line::from("  overall  = uso total da CPU (barra + %)"),
+                Line::from("  load a b c = load average 1/5/15 minutos"),
+                Line::from(""),
+                Line::from(Span::styled("TIPOS DE NUCLEO", Style::default().fg(ui.theme.accent))),
+                Line::from(vec![
+                    Span::styled("  P ", Style::default().fg(ui.theme.accent)),
+                    Span::styled("= Performance: L2 privado, o mais rapido", Style::default().fg(ui.theme.fg)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  E ", Style::default().fg(ui.theme.green)),
+                    Span::styled("= Efficient: compartilha L2 num cluster", Style::default().fg(ui.theme.fg)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  L ", Style::default().fg(ui.theme.red)),
+                    Span::styled("= Low-power: frequencia baixa, economiza bateria", Style::default().fg(ui.theme.fg)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled("CORES E VALORES", Style::default().fg(ui.theme.accent))),
+                Line::from("  GHz = frequencia atual; cor mostra % do limite do nucleo:"),
+                Line::from("        verde <33%  |  amarelo 33-66%  |  vermelho >66%"),
+                Line::from("  °C  = temperatura do nucleo; cor = cor do tipo (P/E/L)"),
+                Line::from("  barra do nucleo: verde <50% | amarelo 50-80% | vermelho >80%"),
+            ],
+        ),
+        2 => (
+            "help 3/5 — memoria e discos",
+            vec![
+                Line::from(Span::styled("MEM (barra empilhada)", Style::default().fg(ui.theme.accent))),
+                Line::from(vec![
+                    Span::styled("  verde ", Style::default().fg(ui.theme.green)),
+                    Span::styled("= usado por apps ", Style::default().fg(ui.theme.fg)),
+                    Span::styled("amarelo ", Style::default().fg(ui.theme.yellow)),
+                    Span::styled("= cache (liberavel)", Style::default().fg(ui.theme.fg)),
+                ]),
+                Line::from(vec![
+                    Span::styled("  azul ", Style::default().fg(ui.theme.accent)),
+                    Span::styled("= buffers (I/O)   ", Style::default().fg(ui.theme.fg)),
+                    Span::styled("cinza ", Style::default().fg(ui.theme.muted)),
+                    Span::styled("= livre", Style::default().fg(ui.theme.fg)),
+                ]),
+                Line::from("  se faltar RAM o kernel descarta o amarelo primeiro;"),
+                Line::from("  o verde so cai fechando apps (a soma = total)"),
+                Line::from("  swap = uso de swap com barra e %"),
+                Line::from("  psi  = pressao de memoria (media 10s/60s/300s):"),
+                Line::from("        verde <5%  |  amarelo 5-10%  |  vermelho >10%"),
+                Line::from("        psi mede o estresse ANTES de a maquina travar"),
+                Line::from(""),
+                Line::from(Span::styled("DISKS", Style::default().fg(ui.theme.accent))),
+                Line::from("  cada linha: nome | barra de uso | % | usado/total | mount"),
+                Line::from("  barra: verde <70% | amarelo 70-85% | vermelho >85%"),
+                Line::from("  subvolumes btrfs do mesmo disco sao agrupados"),
+                Line::from(""),
+                Line::from(Span::styled("PAINEL IO (Tab)", Style::default().fg(ui.theme.accent))),
+                Line::from("  taxas de leitura/escrita por disco (bytes/s desde o"),
+                Line::from("  ultimo refresh); barras escalam pelo disco mais rapido"),
+                Line::from("  azul = leitura | amarelo = escrita | cinza = ocioso"),
+            ],
+        ),
+        4 => (
+            "help 5/5 — IO: o que cada stat significa",
+            vec![
+                Line::from("  r/s w/s  = operacoes de leitura/escrita por segundo (IOPS)."),
+                Line::from("    milhares no NVMe; IOPS alto + taxa baixa = I/O randomico"),
+                Line::from("  r_awt/w_awt  = latencia media da op em ms (fila incluida)."),
+                Line::from("    O numero que diz se o disco e o gargalo:"),
+                Line::from("    verde <2ms | amarelo 2-10ms | vermelho >=10ms (NVMe"),
+                Line::from("    saudavel fica abaixo de 1ms; HDD gira em digitos baixos)"),
+                Line::from("  fila  = requicoes em voo (aqu-sz)."),
+                Line::from("    verde <2 | amarelo 2-8 | vermelho >=8 (HDD: >1 ja enfileira)"),
+                Line::from("  busy  = % do tempo com alguma op em voo. CUIDADO: em NVMe,"),
+                Line::from("    100% NAO significa saturado (16 filas paralelas);"),
+                Line::from("    confie em r_awt/w_awt + fila, nao em busy"),
+                Line::from(""),
+                Line::from(Span::styled("MERGE E TAMANHO DE REQUEST (JSON)", Style::default().fg(ui.theme.accent))),
+                Line::from("  read/write_merge_pct: % de requests juntados pelo kernel."),
+                Line::from("    alto = workload sequencial; baixo + IOPS alto = randomico"),
+                Line::from("  read/write_req_kib: tamanho medio do request."),
+                Line::from("    >=128KiB sequencial | 4-16KiB randomico"),
+                Line::from(""),
+                Line::from(Span::styled("OUTROS", Style::default().fg(ui.theme.accent))),
+                Line::from("  io pressure (psi): % do tempo com I/O travando a maquina."),
+                Line::from("    verde <5 | amarelo 5-10 | vermelho >10"),
+                Line::from("  iowait (linha do CPU): % do tempo ocioso esperando I/O."),
+                Line::from("    >15-20% sustentado + await alto = gargalo de disco;"),
+                Line::from("    iowait alto + await normal = paging (problema de RAM)"),
+                Line::from("  PROCESSOS COM I/O ATIVO: read_bytes/write_bytes reais do"),
+                Line::from("    storage (nao rchar/wchar que incluem cache). So teus"),
+                Line::from("    processos (yama); root ve todos"),
+            ],
+        ),
+        _ => (
+            "help 4/5 — processos e trace",
+            vec![
+                Line::from(Span::styled("TABELA DE PROCESSOS", Style::default().fg(ui.theme.accent))),
+                Line::from("  PID | USER | CPU% | MEM | COMMAND — seta na coluna = ordenada"),
+                Line::from("  CPU% e por nucleo (100% = 1 nucleo inteiro), como o htop"),
+                Line::from("  Enter num nucleo = filtra so os processos daquele nucleo"),
+                Line::from("  H mostra threads, K mostra threads do kernel"),
+                Line::from(""),
+                Line::from(Span::styled("TRACE (tecla s)", Style::default().fg(ui.theme.accent))),
+                Line::from("  mostra as syscalls do processo selecionado ao vivo"),
+                Line::from("  s/q para parar (o processo continua, e feito detach)"),
+                Line::from("  so funciona em processos filhos (yama ptrace_scope=1):"),
+                Line::from("    perfo trace -- <comando>   (spawna e traca)"),
+                Line::from("    sudo sysctl kernel.yama.ptrace_scope=0   (libera todos)"),
+                Line::from(""),
+                Line::from(Span::styled("FORA DO TUI", Style::default().fg(ui.theme.accent))),
+                Line::from("  perfo cpu --json  -> dados pro widget do Omarchy"),
+                Line::from("  perfo bench       -> perfil de refresh (flamegraph)"),
+            ],
+        ),
+    };
+    let text_len = text.len() as u16;
+    let w = 88u16.min(area.width.saturating_sub(2));
+    let h = (text_len + 3).min(area.height.saturating_sub(2));
+    let popup = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    frame.render_widget(Clear, popup);
+    let bg = match ui.theme.bg {
+        Color::Reset => Color::Black,
+        c => c,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ui.theme.accent))
+        .style(Style::default().bg(bg))
+        .title(format!(" {title} "));
+    frame.render_widget(block.clone(), popup);
+    frame.render_widget(Paragraph::new(text), block.inner(popup));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_bytes_scales() {
+        assert_eq!(short_bytes(0), "0.0B");
+        assert_eq!(short_bytes(1024), "1.0K");
+        assert_eq!(short_bytes(20_000), "20K");
+        assert_eq!(short_bytes(535_000_000), "510M");
+        assert_eq!(short_bytes(8_900_000_000), "8.3G");
+    }
+
+    #[test]
+    fn human_bytes_units() {
+        assert_eq!(human_bytes(1024), "1.0KiB");
+        assert_eq!(human_bytes(5 * 1024 * 1024), "5.0MiB");
+    }
+
+    #[test]
+    fn truncate_keeps_short_strings() {
+        assert_eq!(truncate("hello", 5), "hello");
+        assert_eq!(truncate("", 3), "");
+    }
+
+    #[test]
+    fn truncate_ellipsizes_long_strings() {
+        assert_eq!(truncate("hello world", 5), "hello…");
+        assert_eq!(truncate("日本語テキスト", 3), "日本語…");
+    }
+
+    #[test]
+    fn bar_fills_and_clamps() {
+        assert_eq!(bar(50.0, 10), "█████░░░░░");
+        assert_eq!(bar(200.0, 4), "████");
+        assert_eq!(bar(0.0, 4), "░░░░");
+    }
+
+    #[test]
+    fn ghz_format() {
+        assert_eq!(ghz(500), "500M");
+        assert_eq!(ghz(1000), "1.0G");
+        assert_eq!(ghz(4900), "4.9G");
+    }
+
+    fn disk(name: &str) -> crate::data::disk::DiskInfo {
+        crate::data::disk::DiskInfo {
+            name: name.into(),
+            mount: "/".into(),
+            fs: "btrfs".into(),
+            total_bytes: 100,
+            available_bytes: 50,
+            used_bytes: 50,
+            percent: 50.0,
+            read_bps: 0,
+            write_bps: 0,
+            total_read_bytes: 0,
+            total_written_bytes: 0,
+            io: Default::default(),
+        }
+    }
+
+    #[test]
+    fn unique_disks_dedupes_by_device() {
+        let d = disk("/dev/mapper/root");
+        let boot = disk("/dev/nvme0n1p1");
+        let disks = [d.clone(), d.clone(), boot, d];
+        let uniq: Vec<&String> = unique_disks(&disks).iter().map(|x| &x.name).collect();
+        assert_eq!(uniq, vec!["/dev/mapper/root", "/dev/nvme0n1p1"]);
+    }
+
+    #[test]
+    fn unique_disks_caps_at_five() {
+        let disks: Vec<_> = (0..8).map(|i| disk(&format!("/dev/disk{i}"))).collect();
+        assert_eq!(unique_disks(&disks).len(), 5);
+    }
+
+    #[test]
+    fn rate_bar_scales_and_clamps() {
+        assert_eq!(rate_bar(50_000_000, 100_000_000, 10), "█████░░░░░");
+        assert_eq!(rate_bar(0, 100_000_000, 10), "░░░░░░░░░░");
+        assert_eq!(rate_bar(1, 0, 10), "░░░░░░░░░░");
+    }
+}

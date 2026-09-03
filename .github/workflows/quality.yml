@@ -1,0 +1,52 @@
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  RUSTQUAL_BASELINE: .github/rustqual-baseline.json
+  # Gate do rust-doctor: falha abaixo de 70/100.
+  RUSTDOCTOR_THRESHOLD: 70
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Instala rustqual + rust-doctor
+        run: |
+          cargo install rustqual --locked
+          cargo install rust-doctor --locked
+      - name: rustqual — gate de regressao vs baseline (findings + score)
+        run: |
+          rustqual . --json > current.json
+          cur_total=$(jq -r '.summary.total' current.json)
+          cur_score=$(jq -r '.summary.quality_score' current.json)
+          base_total=$(jq -r '.total' "$RUSTQUAL_BASELINE")
+          base_score=$(jq -r '.quality_score' "$RUSTQUAL_BASELINE")
+          echo "findings: $base_total -> $cur_total | score: $base_score -> $cur_score"
+          jq -e \
+            --argjson ct "$cur_total" --argjson cs "$cur_score" \
+            --argjson bt "$base_total" --argjson bs "$base_score" \
+            '($ct <= $bt) and ($cs >= $bs - 0.001)' \
+            <<< '{}' >/dev/null
+          rustqual . --format github
+      - name: rustqual — SARIF (code scanning)
+        run: rustqual . --format sarif > rustqual.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: rustqual.sarif
+      - name: rust-doctor — gate de score
+        run: |
+          score=$(rust-doctor --json . | jq -r '.audit.score.value')
+          echo "rust-doctor score: $score/100"
+          if [ "$score" -lt "$RUSTDOCTOR_THRESHOLD" ]; then
+            echo "::error::score $score abaixo do limite $RUSTDOCTOR_THRESHOLD"
+            exit 1
+          fi

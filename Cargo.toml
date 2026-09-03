@@ -1,0 +1,18 @@
+[package]
+name = "perfo"
+version = "0.1.0"
+edition = "2021"
+description = "System performance monitor - htop-like CPU focus, TUI + JSON data for an Omarchy widget"
+license = "MIT"
+
+[dependencies]
+crossterm = "0.28"
+libc = "0.2"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.39"
+
+[profile.release]
+lto = true
+strip = true
