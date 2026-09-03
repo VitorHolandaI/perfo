@@ -243,7 +243,9 @@ fn core_type_of(shares_l2_with_others: bool, max_freq_mhz: u64) -> CoreType {
     if !shares_l2_with_others {
         return CoreType::P;
     }
-    if max_freq_mhz < LPE_MAX_FREQ_MHZ {
+    // max_freq 0 = cpufreq ausente (ARM, pstate off...); nao da pra
+    // distinguir E de LPE, entao assume E em vez de classificar tudo de LPE.
+    if max_freq_mhz > 0 && max_freq_mhz < LPE_MAX_FREQ_MHZ {
         CoreType::Lpe
     } else {
         CoreType::E
@@ -595,6 +597,8 @@ mod tests {
         assert_eq!(core_type_of(true, 2500), CoreType::Lpe);
         assert_eq!(core_type_of(true, 4400), CoreType::E);
         assert_eq!(core_type_of(false, 0), CoreType::P);
+        // cpufreq ausente (max_freq 0): nao pode classificar tudo de LPE.
+        assert_eq!(core_type_of(true, 0), CoreType::E);
     }
 
     #[test]

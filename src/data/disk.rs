@@ -87,9 +87,9 @@ struct RawCounters {
     flushes: u64,
 }
 
-/// Parses /proc/diskstats lines keyed by device name. Discard/flush fields
-/// (kernel 4.18+/5.5+) feed d_s/flush_s; the merged-discard and discard-ms
-/// fields are still skipped.
+/// Parses /proc/diskstats lines keyed by device name. The 11 core fields
+/// are mandatory; discard/flush fields (kernel 4.18+/5.5+) default to zero
+/// when absent so older kernels still produce I/O stats.
 fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
     let mut out = HashMap::new();
     for line in raw.lines() {
@@ -97,17 +97,17 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
         let (_major, _minor, name) = (f.next(), f.next(), f.next());
         let Some(name) = name else { continue };
         let mut n = [0u64; 14];
-        let mut ok = true;
+        let mut count = 0usize;
         for slot in n.iter_mut() {
             match f.next().and_then(|v| v.parse().ok()) {
-                Some(v) => *slot = v,
-                None => {
-                    ok = false;
-                    break;
+                Some(v) => {
+                    *slot = v;
+                    count += 1;
                 }
+                None => break,
             }
         }
-        if !ok {
+        if count < 11 {
             continue;
         }
         out.insert(
@@ -359,18 +359,29 @@ fn push_capped(q: &mut VecDeque<f32>, v: f32, cap: usize) {
     }
 }
 
-/// First hwmon temp1_input (millidegrees) directly under `dir`.
+/// First hwmon temp1_input (millidegrees) under `dir`, preferring the NVMe
+/// controller (hwmon "name" == "nvme"); other sensors are a fallback since
+/// some block devices expose unrelated hwmon temps.
 fn scan_hwmon(dir: &Path) -> Option<f32> {
     let entries = std::fs::read_dir(dir).ok()?;
+    let mut fallback: Option<f32> = None;
     for e in entries.flatten() {
         if !e.file_name().to_string_lossy().starts_with("hwmon") {
             continue;
         }
         let raw = std::fs::read_to_string(e.path().join("temp1_input")).ok()?;
         let milli: i64 = raw.trim().parse().ok()?;
-        return Some(milli as f32 / 1000.0);
+        let is_nvme = std::fs::read_to_string(e.path().join("name"))
+            .map(|n| n.trim() == "nvme")
+            .unwrap_or(false);
+        if is_nvme {
+            return Some(milli as f32 / 1000.0);
+        }
+        if fallback.is_none() {
+            fallback = Some(milli as f32 / 1000.0);
+        }
     }
-    None
+    fallback
 }
 
 /// Device temperature in °C from the first hwmon temp1_input of the disk
@@ -440,6 +451,32 @@ mod tests {
     }
 
     #[test]
+    fn diskstats_old_kernel_without_discard_fields() {
+        // Pre-4.18 kernels emit only the 11 core fields; discards/flushes
+        // must default to zero instead of dropping the whole device.
+        let raw = "259 0 nvme0n1 1000 0 100000 500 200 0 40000 400 0 600 800\n";
+        let m = diskstats_from(raw);
+        let c = &m["nvme0n1"];
+        assert_eq!(c.reads, 1000);
+        assert_eq!(c.discards, 0);
+        assert_eq!(c.flushes, 0);
+    }
+
+    #[test]
+    fn scan_hwmon_prefers_nvme_name() {
+        let base = std::env::temp_dir().join(format!("perfo-hwmon-name-{}", std::process::id()));
+        // Unknown sensor first, nvme second: must pick the nvme one.
+        std::fs::create_dir_all(base.join("hwmon0")).unwrap();
+        std::fs::write(base.join("hwmon0/temp1_input"), "99000\n").unwrap();
+        std::fs::write(base.join("hwmon0/name"), "acpitz\n").unwrap();
+        std::fs::create_dir_all(base.join("hwmon1")).unwrap();
+        std::fs::write(base.join("hwmon1/temp1_input"), "45000\n").unwrap();
+        std::fs::write(base.join("hwmon1/name"), "nvme\n").unwrap();
+        assert_eq!(scan_hwmon(&base), Some(45.0));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn io_stats_computes_discard_and_flush() {
         let prev = diskstats_from(line());
         // +100 discards, +8000 sectors, +200 flushes in 2s.
@@ -481,7 +518,7 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
-#[test]
+    #[test]
     fn nvme_temp_dm_resolves_through_slaves() {
         let base = std::env::temp_dir().join(format!("perfo-hwmon-dm-{}", std::process::id()));
         // sysfs layout: partition dir lives INSIDE the disk node dir.

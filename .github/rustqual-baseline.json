@@ -1,16 +1,16 @@
 {
   "version": 2,
   "quality_score": 0.0,
-  "iosp_score": 0.9495798319327731,
+  "iosp_score": 0.95,
   "violations": 6,
-  "total": 187,
+  "total": 189,
   "complexity_warnings": 7,
-  "magic_number_warnings": 85,
+  "magic_number_warnings": 87,
   "nesting_depth_warnings": 3,
   "function_length_warnings": 11,
   "unsafe_warnings": 10,
   "error_handling_warnings": 2,
-  "duplicate_groups": 4,
+  "duplicate_groups": 6,
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
@@ -28,12 +28,12 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 203,
+  "total_findings": 207,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
-      "line": 364
+      "line": 366
     },
     {
       "name": "DiskMonitor::refresh",

@@ -323,13 +323,15 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
                 Some(CoreType::Lpe) => ui.theme.red,
                 _ => ui.theme.muted,
             };
-            let freq = ghz(ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0));
+            let cur_mhz = ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0);
+            // No cpufreq/scaling driver -> unknown frequency, show a dash.
+            let freq = if cur_mhz > 0 {
+                ghz(cur_mhz)
+            } else {
+                " - ".to_string()
+            };
             let max = ui.snap.per_core_max_freq_mhz.get(i).copied().unwrap_or(0);
-            let freq_c = freq_color(
-                ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0),
-                max,
-                &ui.theme,
-            );
+            let freq_c = freq_color(cur_mhz, max, &ui.theme);
             let temp = match ui.snap.per_core_temp_c.get(i).copied().flatten() {
                 Some(t) => format!(" {t:.0}\u{00B0}"),
                 None => String::new(),
