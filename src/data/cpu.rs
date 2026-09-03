@@ -10,8 +10,6 @@ use sysinfo::{
 /// /proc/<pid>/stat: field 39 (last processor) is the 36th whitespace token
 /// after the closing `)` of the comm field.
 const LAST_CPU_STAT_FIELD: usize = 36;
-/// Max frequency below which a shared-L2 core is classified low-power (MHz).
-const LPE_MAX_FREQ_MHZ: u64 = 3000;
 /// cpuinfo_max_freq is exposed in kHz; our numbers are MHz.
 const KHZ_PER_MHZ: u64 = 1000;
 
@@ -103,6 +101,7 @@ fn last_cpu_of(pid: u32) -> Option<u32> {
 
 use crate::data::disk::{DiskInfo, DiskMonitor};
 use crate::data::mem::{self, MemSnapshot};
+use crate::data::net::{NetMonitor, NetSnapshot};
 
 #[derive(Serialize)]
 pub struct CpuSnapshot {
@@ -125,6 +124,8 @@ pub struct CpuSnapshot {
     pub disks: Vec<DiskInfo>,
     /// Per-device read/write rate rings (newest last) for IO sparklines.
     pub io_history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
+    /// Per-interface network rates + TCP totals.
+    pub net: NetSnapshot,
     pub processes: Vec<ProcessInfo>,
 }
 
@@ -236,30 +237,125 @@ fn per_core_max_freqs() -> Vec<u64> {
         .collect()
 }
 
-/// Hybrid-core classification: private L2 => P-core; shared L2 + low max
-/// frequency (< LPE_MAX_FREQ_MHZ) => low-power E-core; shared L2 otherwise
-/// => E-core.
-fn core_type_of(shares_l2_with_others: bool, max_freq_mhz: u64) -> CoreType {
-    if !shares_l2_with_others {
-        return CoreType::P;
-    }
-    // max_freq 0 = cpufreq ausente (ARM, pstate off...); nao da pra
-    // distinguir E de LPE, entao assume E em vez de classificar tudo de LPE.
-    if max_freq_mhz > 0 && max_freq_mhz < LPE_MAX_FREQ_MHZ {
-        CoreType::Lpe
-    } else {
+/// Hybrid-core classification from the shared-L2 topology only: private L2
+/// => P-core, shared L2 => E-core. Used when no frequency data exists.
+fn core_type_of(shares_l2_with_others: bool, _max_freq_mhz: u64) -> CoreType {
+    if shares_l2_with_others {
         CoreType::E
+    } else {
+        CoreType::P
     }
 }
 
+/// Distinct per-core max frequencies, descending (e.g. [4900, 4400, 2500]).
+fn freq_buckets(max_freqs: &[u64]) -> Vec<u64> {
+    let mut v: Vec<u64> = max_freqs.iter().copied().filter(|&f| f > 0).collect();
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    v.dedup();
+    v
+}
+
+/// Intel hybrid core type via CPUID leaf 0x1A (std intrinsic, zero deps).
+///
+/// Encoding CHANGED between generations, so this is only a best-effort
+/// fallback when cpufreq is missing: Alder Lake reports 1=Atom(E)/2=Core(P);
+/// Arrow Lake reports 2=Atom(LPE)/3=Core(E+P). The frequency buckets are
+/// the authoritative source.
+fn hybrid_core_type() -> Option<CoreType> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let v = std::arch::x86_64::__cpuid(0);
+        let ebx = v.ebx.to_ne_bytes();
+        let edx = v.edx.to_ne_bytes();
+        let ecx = v.ecx.to_ne_bytes();
+        if ebx != *b"Genu" || edx != *b"ineI" || ecx != *b"ntel" {
+            return None;
+        }
+        if v.eax < 0x1A {
+            return None;
+        }
+        let out = std::arch::x86_64::__cpuid_count(0x1A, 0);
+        match out.eax & 0xFF {
+            // Alder Lake: Atom = E-core.
+            1 => Some(CoreType::E),
+            // Alder Lake: Core = P-core (Arrow Lake: Atom = LPE).
+            2 => Some(CoreType::P),
+            // Arrow Lake: Core/Efficient = P and E cores alike.
+            3 => Some(CoreType::E),
+            _ => None,
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        None
+    }
+}
+
+/// Runs `f` pinned to the given CPU (sched_setaffinity, libc — the binary
+/// already links it for ptrace). Returns None when pinning fails.
+fn on_cpu<F: FnOnce() -> Option<CoreType> + Send>(cpu: usize, f: F) -> Option<CoreType> {
+    std::thread::scope(|s| {
+        let handle = s.spawn(move || {
+            let mut set: libc::cpu_set_t = unsafe { std::mem::zeroed() };
+            // SAFETY: set is zeroed and sized by libc; CPU_SET is the
+            // documented macro, sched_setaffinity(0) targets this thread.
+            unsafe {
+                libc::CPU_ZERO(&mut set);
+                libc::CPU_SET(cpu, &mut set);
+            }
+            let rc =
+                unsafe { libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) };
+            if rc == 0 {
+                f()
+            } else {
+                None
+            }
+        });
+        handle.join().ok().flatten()
+    })
+}
+
+/// P/E/LPE per core, generation-independent:
+/// 1. Distinct max-freq buckets — the top bucket is P, the bottom is LPE
+///    (3 buckets), the middle E. Works on Alder Lake and Arrow Lake alike
+///    (their cpuid 0x1A encodings differ).
+/// 2. Uniform max freq: not hybrid — shared-L2 topology decides P vs E.
+/// 3. No cpufreq at all: best-effort cpuid 0x1A probe per core.
 fn core_types_of() -> Vec<CoreType> {
     let max_freqs = per_core_max_freqs();
-    (0..cpu_count())
-        .map(|i| {
-            let others = shared_l2_cpus(i).iter().filter(|&&c| c != i).count();
-            core_type_of(others > 0, max_freqs.get(i).copied().unwrap_or(0))
-        })
-        .collect()
+    let buckets = freq_buckets(&max_freqs);
+    if buckets.len() >= 2 {
+        let p_max = buckets[0];
+        let lpe_max = buckets.get(2).copied();
+        max_freqs
+            .iter()
+            .map(|&f| {
+                if Some(f) == lpe_max && buckets.len() >= 3 {
+                    CoreType::Lpe
+                } else if f == p_max {
+                    CoreType::P
+                } else {
+                    CoreType::E
+                }
+            })
+            .collect()
+    } else if buckets.len() == 1 {
+        (0..cpu_count())
+            .map(|i| {
+                let others = shared_l2_cpus(i).iter().filter(|&&c| c != i).count();
+                core_type_of(others > 0, 0)
+            })
+            .collect()
+    } else {
+        (0..cpu_count())
+            .map(|i| {
+                on_cpu(i, hybrid_core_type).unwrap_or_else(|| {
+                    let others = shared_l2_cpus(i).iter().filter(|&&c| c != i).count();
+                    core_type_of(others > 0, 0)
+                })
+            })
+            .collect()
+    }
 }
 
 /// Samples CPU + process data via sysinfo.
@@ -271,6 +367,7 @@ pub struct CpuMonitor {
     sys: System,
     components: Components,
     disks: DiskMonitor,
+    net: NetMonitor,
     users_cache: HashMap<u32, String>,
     /// pid -> last-run CPU, refreshed only on full process refreshes.
     last_cpu: HashMap<u32, u32>,
@@ -286,6 +383,8 @@ pub struct CpuMonitor {
     stat_prev: (u64, u64),
     /// When the last full refresh happened (drives I/O rate conversion).
     last_full: Option<Instant>,
+    /// P/E/L classification, probed once via CPUID 0x1A (pinned threads).
+    core_types: Vec<CoreType>,
 }
 
 /// Resolve a uid to a username via NSS (getpwuid_r), "?" on failure.
@@ -331,6 +430,7 @@ impl CpuMonitor {
             sys,
             components: Components::new_with_refreshed_list(),
             disks: DiskMonitor::new(),
+            net: NetMonitor::new(),
             users_cache: HashMap::new(),
             last_cpu: HashMap::new(),
             io_prev: HashMap::new(),
@@ -339,6 +439,7 @@ impl CpuMonitor {
             io_window_start: Instant::now(),
             stat_prev: (0, 0),
             last_full: None,
+            core_types: core_types_of(),
         };
         // Seed CPU deltas so the first real refresh has a window to measure.
         monitor.refresh();
@@ -366,6 +467,7 @@ impl CpuMonitor {
     pub fn refresh(&mut self) {
         Self::do_refresh(&mut self.sys);
         self.disks.refresh();
+        self.net.refresh();
         let now = Instant::now();
         let elapsed = self
             .last_full
@@ -446,7 +548,7 @@ impl CpuMonitor {
             0.0
         };
         let per_core: Vec<f32> = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
-        let per_core_types = core_types_of();
+        let per_core_types = self.core_types.clone();
         let per_core_freq_mhz: Vec<u64> = self.sys.cpus().iter().map(|c| c.frequency()).collect();
         let per_core_max_freq_mhz = per_core_max_freqs();
         let cpu_temp_c: Option<f32> = self
@@ -534,6 +636,7 @@ impl CpuMonitor {
             io_pressure_some: self.disks.io_pressure(),
             io_history: self.disks.history().clone(),
             disks: self.disks.snapshot(),
+            net: self.net.snapshot(),
             processes,
         }
     }
@@ -594,11 +697,53 @@ mod tests {
     #[test]
     fn core_type_classification() {
         assert_eq!(core_type_of(false, 4900), CoreType::P);
-        assert_eq!(core_type_of(true, 2500), CoreType::Lpe);
         assert_eq!(core_type_of(true, 4400), CoreType::E);
+        // Sem freq, so L2 compartilhado decide P vs E.
         assert_eq!(core_type_of(false, 0), CoreType::P);
-        // cpufreq ausente (max_freq 0): nao pode classificar tudo de LPE.
         assert_eq!(core_type_of(true, 0), CoreType::E);
+    }
+
+    #[test]
+    fn freq_buckets_sorted_desc_and_deduped() {
+        assert_eq!(
+            freq_buckets(&[2500, 4900, 4400, 2500]),
+            vec![4900, 4400, 2500]
+        );
+        assert_eq!(freq_buckets(&[0, 0]), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn core_types_of_splits_three_buckets() {
+        // Core Ultra 225H: 4x4900 (P) + 8x4400 (E) + 2x2500 (LPE).
+        let freqs = [
+            4900, 4900, 4900, 4900, 4400, 4400, 4400, 4400, 4400, 4400, 4400, 4400, 2500, 2500,
+        ];
+        let buckets = freq_buckets(&freqs);
+        assert_eq!(buckets.len(), 3);
+        let p_max = buckets[0];
+        let lpe_max = buckets[2];
+        let types: Vec<CoreType> = freqs
+            .iter()
+            .map(|&f| {
+                if f == lpe_max && buckets.len() >= 3 {
+                    CoreType::Lpe
+                } else if f == p_max {
+                    CoreType::P
+                } else {
+                    CoreType::E
+                }
+            })
+            .collect();
+        assert_eq!(types[0], CoreType::P);
+        assert_eq!(types[4], CoreType::E);
+        assert_eq!(types[12], CoreType::Lpe);
+        assert_eq!(types[13], CoreType::Lpe);
+    }
+
+    #[test]
+    fn on_cpu_pins_and_returns_value() {
+        assert_eq!(on_cpu(0, || Some(CoreType::P)), Some(CoreType::P));
+        assert_eq!(on_cpu(0, || None), None);
     }
 
     #[test]

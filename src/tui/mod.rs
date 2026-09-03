@@ -428,7 +428,8 @@ fn handle_normal_key(
         KeyCode::Tab | KeyCode::BackTab => {
             state.pane = match state.pane {
                 Pane::Cpu => Pane::Io,
-                Pane::Io => Pane::Procs,
+                Pane::Io => Pane::Net,
+                Pane::Net => Pane::Procs,
                 Pane::Procs => Pane::Cpu,
             };
             false
@@ -621,6 +622,7 @@ fn status_line(state: &State) -> String {
     let pane = match state.pane {
         Pane::Cpu => "[CPU pane] ",
         Pane::Io => "[IO pane] ",
+        Pane::Net => "[NET pane] ",
         Pane::Procs => "[PROCS pane] ",
     };
     format!(

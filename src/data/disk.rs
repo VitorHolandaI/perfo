@@ -60,8 +60,8 @@ pub struct DiskInfo {
     pub io: DiskIoStats,
 }
 
-/// Bytes per second from a refresh-interval delta.
-fn rate(delta: u64, elapsed_secs: f32) -> u64 {
+/// Bytes per second from a refresh-interval delta. Shared with net.rs.
+pub(crate) fn rate(delta: u64, elapsed_secs: f32) -> u64 {
     if elapsed_secs <= 0.0 {
         0
     } else {

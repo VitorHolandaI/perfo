@@ -1,13 +1,13 @@
 {
   "version": 2,
-  "quality_score": 0.0,
-  "iosp_score": 0.95,
-  "violations": 6,
-  "total": 189,
+  "quality_score": 0.06422873834400578,
+  "iosp_score": 0.9689922480620154,
+  "violations": 4,
+  "total": 207,
   "complexity_warnings": 7,
-  "magic_number_warnings": 87,
+  "magic_number_warnings": 94,
   "nesting_depth_warnings": 3,
-  "function_length_warnings": 11,
+  "function_length_warnings": 12,
   "unsafe_warnings": 10,
   "error_handling_warnings": 2,
   "duplicate_groups": 6,
@@ -23,22 +23,17 @@
   "coupling_cycles": 0,
   "tq_no_assertion_warnings": 0,
   "tq_no_sut_warnings": 0,
-  "tq_untested_warnings": 62,
+  "tq_untested_warnings": 4,
   "tq_uncovered_warnings": 0,
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 207,
+  "total_findings": 155,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
-      "line": 366
-    },
-    {
-      "name": "DiskMonitor::refresh",
-      "file": "src/data/disk.rs",
-      "line": 231
+      "line": 467
     },
     {
       "name": "run_loop",
@@ -54,11 +49,6 @@
       "name": "build_tree",
       "file": "src/tui/mod.rs",
       "line": 243
-    },
-    {
-      "name": "main",
-      "file": "src/main.rs",
-      "line": 80
     }
   ]
 }

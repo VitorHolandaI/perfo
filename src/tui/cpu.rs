@@ -33,6 +33,7 @@ pub enum SortKey {
 pub enum Pane {
     Cpu,
     Io,
+    Net,
     Procs,
 }
 
@@ -211,6 +212,8 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
     draw_disks(frame, disk_area, ui);
     if ui.pane == Pane::Io {
         draw_io(frame, proc_area, ui);
+    } else if ui.pane == Pane::Net {
+        draw_net(frame, proc_area, ui);
     } else {
         draw_processes(frame, proc_area, ui);
     }
@@ -677,6 +680,114 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
                 ),
             ]));
         }
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Full-pane network view (Tab -> NET): per-interface rx/tx rates and
+/// packet/error/drop counters plus TCP retransmissions and connections.
+fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let focused = ui.pane == Pane::Net;
+    let block = block("NET", focused, &ui.theme);
+    frame.render_widget(block.clone(), area);
+    let inner = block.inner(area);
+    let totals = &ui.snap.net.totals;
+    let pipe = |s: &str| Span::styled(s.to_string(), Style::default().fg(ui.theme.muted));
+
+    let mut lines = vec![Line::from(vec![
+        pipe("│"),
+        Span::styled(
+            format!(" rx {:>8}/s", short_bytes(totals.rx_bps)),
+            Style::default().fg(ui.theme.accent),
+        ),
+        pipe("│"),
+        Span::styled(
+            format!(" tx {:>8}/s", short_bytes(totals.tx_bps)),
+            Style::default().fg(ui.theme.yellow),
+        ),
+        pipe("│"),
+        Span::styled(
+            format!(" tcp retrans {:>4}/s", totals.tcp_retrans_s),
+            Style::default().fg(if totals.tcp_retrans_s > 0 {
+                ui.theme.red
+            } else {
+                ui.theme.fg
+            }),
+        ),
+        pipe("│"),
+        Span::styled(
+            format!(" {:>4} conexoes", totals.tcp_established),
+            Style::default().fg(ui.theme.fg),
+        ),
+        pipe("│"),
+        Span::styled(" ultimo refresh", Style::default().fg(ui.theme.muted)),
+    ])];
+    lines.push(Line::from(vec![
+        pipe(&format!(" {:<9}", "IFACE")),
+        pipe("│"),
+        pipe(&format!("{:>9}", "RX/s")),
+        pipe("│"),
+        pipe(&format!("{:>9}", "TX/s")),
+        pipe("│"),
+        pipe(&format!("{:>7}", "rx pps")),
+        pipe("│"),
+        pipe(&format!("{:>7}", "tx pps")),
+        pipe("│"),
+        pipe(&format!("{:>5}", "err")),
+        pipe("│"),
+        pipe(&format!("{:>5}", "drop")),
+        pipe("│"),
+        pipe(&format!("{:>10}", "LINK")),
+    ]));
+    for i in &ui.snap.net.ifaces {
+        let link = match (i.link_mbps, i.link_up) {
+            (Some(m), true) => format!("{m}M up"),
+            (Some(m), false) => format!("{m}M down"),
+            (None, true) => "up".to_string(),
+            (None, false) => "-".to_string(),
+        };
+        let err_color = if i.rx_errs_s + i.tx_errs_s > 0 {
+            ui.theme.red
+        } else {
+            ui.theme.muted
+        };
+        let drop_color = if i.rx_drops_s + i.tx_drops_s > 0 {
+            ui.theme.red
+        } else {
+            ui.theme.muted
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {:<9}", truncate(&i.name, 9)),
+                Style::default().fg(ui.theme.muted),
+            ),
+            pipe("│"),
+            Span::styled(
+                format!("{:>9}", format!("{}/s", short_bytes(i.rx_bps))),
+                Style::default().fg(ui.theme.accent),
+            ),
+            pipe("│"),
+            Span::styled(
+                format!("{:>9}", format!("{}/s", short_bytes(i.tx_bps))),
+                Style::default().fg(ui.theme.yellow),
+            ),
+            pipe("│"),
+            Span::styled(format!("{:>7}", i.rx_pps), Style::default().fg(ui.theme.fg)),
+            pipe("│"),
+            Span::styled(format!("{:>7}", i.tx_pps), Style::default().fg(ui.theme.fg)),
+            pipe("│"),
+            Span::styled(
+                format!("{:>5}", i.rx_errs_s + i.tx_errs_s),
+                Style::default().fg(err_color),
+            ),
+            pipe("│"),
+            Span::styled(
+                format!("{:>5}", i.rx_drops_s + i.tx_drops_s),
+                Style::default().fg(drop_color),
+            ),
+            pipe("│"),
+            Span::styled(format!("{:>10}", link), Style::default().fg(ui.theme.fg)),
+        ]));
     }
     frame.render_widget(Paragraph::new(lines), inner);
 }
