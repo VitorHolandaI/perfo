@@ -437,6 +437,7 @@ fn handle_normal_key(
                 Pane::Net => Pane::Procs,
                 Pane::Procs => Pane::Cpu,
             };
+            state.fullscreen = true;
             false
         }
         KeyCode::Char('k') => {

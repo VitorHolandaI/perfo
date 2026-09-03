@@ -7,6 +7,18 @@ use sysinfo::Disks;
 
 use super::psi;
 
+/// Bytes in one diskstats sector (kernel convention, independent of the
+/// device's logical block size).
+const BYTES_PER_SECTOR: u64 = 512;
+/// KiB in bytes.
+const BYTES_PER_KIB: u64 = 1024;
+/// Milliseconds per second.
+const MS_PER_SEC: f32 = 1000.0;
+/// /proc/diskstats fields read into RawCounters (14 = discards + flush).
+const DISKSTAT_FIELDS: usize = 14;
+/// Minimum fields a line must have (pre-4.18 kernels lack discard/flush).
+const DISKSTAT_MIN_FIELDS: usize = 11;
+
 /// Per-disk I/O rates derived from /proc/diskstats deltas (iostat-style).
 #[derive(Clone, Serialize, Default)]
 pub struct DiskIoStats {
@@ -96,7 +108,7 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
         let mut f = line.split_whitespace();
         let (_major, _minor, name) = (f.next(), f.next(), f.next());
         let Some(name) = name else { continue };
-        let mut n = [0u64; 14];
+        let mut n = [0u64; DISKSTAT_FIELDS];
         let mut count = 0usize;
         for slot in n.iter_mut() {
             match f.next().and_then(|v| v.parse().ok()) {
@@ -107,7 +119,7 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
                 None => break,
             }
         }
-        if count < 11 {
+        if count < DISKSTAT_MIN_FIELDS {
             continue;
         }
         out.insert(
@@ -159,8 +171,8 @@ fn io_stats_from(prev: &RawCounters, cur: &RawCounters, elapsed_secs: f32) -> Di
         w_s: rate(writes, e),
         r_await_ms: r_await,
         w_await_ms: w_await,
-        queue_avg: d(prev.ms_weighted_io, cur.ms_weighted_io) as f32 / (e * 1000.0),
-        busy_pct: d(prev.ms_doing_io, cur.ms_doing_io) as f32 / (e * 10.0),
+        queue_avg: d(prev.ms_weighted_io, cur.ms_weighted_io) as f32 / (e * MS_PER_SEC),
+        busy_pct: d(prev.ms_doing_io, cur.ms_doing_io) as f32 / (e * MS_PER_SEC / 100.0),
         read_merge_pct: if r_merge > 0 {
             d(prev.reads_merged, cur.reads_merged) as f32 / r_merge as f32 * 100.0
         } else {
@@ -172,12 +184,16 @@ fn io_stats_from(prev: &RawCounters, cur: &RawCounters, elapsed_secs: f32) -> Di
             0.0
         },
         read_req_kib: if reads > 0 {
-            d(prev.sectors_read, cur.sectors_read) as f32 * 512.0 / 1024.0 / reads as f32
+            d(prev.sectors_read, cur.sectors_read) as f32 * BYTES_PER_SECTOR as f32
+                / BYTES_PER_KIB as f32
+                / reads as f32
         } else {
             0.0
         },
         write_req_kib: if writes > 0 {
-            d(prev.sectors_written, cur.sectors_written) as f32 * 512.0 / 1024.0 / writes as f32
+            d(prev.sectors_written, cur.sectors_written) as f32 * BYTES_PER_SECTOR as f32
+                / BYTES_PER_KIB as f32
+                / writes as f32
         } else {
             0.0
         },
@@ -185,7 +201,7 @@ fn io_stats_from(prev: &RawCounters, cur: &RawCounters, elapsed_secs: f32) -> Di
         discard_req_kib: {
             let discards = d(prev.discards, cur.discards);
             if discards > 0 {
-                d(prev.discard_sectors, cur.discard_sectors) as f32 * 512.0
+                d(prev.discard_sectors, cur.discard_sectors) as f32 * BYTES_PER_SECTOR as f32
                     / 1024.0
                     / discards as f32
             } else {
@@ -213,6 +229,12 @@ pub struct DiskMonitor {
     /// Per-device read/write byte-rate history (diskstats-derived), newest
     /// last; feeds the sparklines in the IO pane.
     history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
+}
+
+impl Default for DiskMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiskMonitor {
@@ -270,8 +292,8 @@ impl DiskMonitor {
         // deltas as the table columns (not sysinfo, which lags a refresh).
         for (name, c) in cur.iter() {
             if let Some(p) = self.prev_stats.get(name) {
-                let rb = d_sectors(p.sectors_read, c.sectors_read) * 512;
-                let wb = d_sectors(p.sectors_written, c.sectors_written) * 512;
+                let rb = d_sectors(p.sectors_read, c.sectors_read) * BYTES_PER_SECTOR;
+                let wb = d_sectors(p.sectors_written, c.sectors_written) * BYTES_PER_SECTOR;
                 let (rq, wq) = self
                     .history
                     .entry(name.clone())
@@ -375,10 +397,10 @@ fn scan_hwmon(dir: &Path) -> Option<f32> {
             .map(|n| n.trim() == "nvme")
             .unwrap_or(false);
         if is_nvme {
-            return Some(milli as f32 / 1000.0);
+            return Some(milli as f32 / MS_PER_SEC);
         }
         if fallback.is_none() {
-            fallback = Some(milli as f32 / 1000.0);
+            fallback = Some(milli as f32 / MS_PER_SEC);
         }
     }
     fallback

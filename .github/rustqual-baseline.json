@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "quality_score": 0.04799999999999993,
-  "iosp_score": 0.9696969696969697,
+  "quality_score": 0.1433636363636357,
+  "iosp_score": 0.9714285714285714,
   "violations": 4,
-  "total": 210,
+  "total": 220,
   "complexity_warnings": 7,
-  "magic_number_warnings": 99,
+  "magic_number_warnings": 89,
   "nesting_depth_warnings": 3,
   "function_length_warnings": 12,
   "unsafe_warnings": 10,
@@ -16,7 +16,7 @@
   "fragment_groups": 4,
   "boilerplate_warnings": 1,
   "srp_struct_warnings": 0,
-  "srp_module_warnings": 7,
+  "srp_module_warnings": 8,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,12 +28,12 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 160,
+  "total_findings": 151,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
-      "line": 467
+      "line": 473
     },
     {
       "name": "run_loop",

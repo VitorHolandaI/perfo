@@ -5,6 +5,11 @@ use serde::Serialize;
 
 use super::disk::rate;
 
+/// /proc/net/dev columns read per interface (16 = rx+tx pairs with fifo).
+const DEV_FIELDS: usize = 16;
+/// Minimum columns a line must have (tx_bytes is column 9, tx_drop 12).
+const DEV_MIN_FIELDS: usize = 12;
+
 /// Per-interface network counters from /proc/net/dev.
 ///
 /// Line layout (after the name): rx_bytes rx_packets rx_errs rx_drop
@@ -20,7 +25,7 @@ fn netdev_from(raw: &str) -> HashMap<String, DevCounters> {
             None => continue,
         };
         let mut f = rest.split_whitespace();
-        let mut n = [0u64; 16];
+        let mut n = [0u64; DEV_FIELDS];
         let mut count = 0usize;
         for slot in n.iter_mut() {
             match f.next().and_then(|v| v.parse().ok()) {
@@ -31,7 +36,7 @@ fn netdev_from(raw: &str) -> HashMap<String, DevCounters> {
                 None => break,
             }
         }
-        if count < 12 {
+        if count < DEV_MIN_FIELDS {
             continue;
         }
         out.insert(
@@ -118,6 +123,17 @@ pub struct NetTotals {
 pub struct NetSnapshot {
     pub ifaces: Vec<NetInfo>,
     pub totals: NetTotals,
+    /// Processes with open sockets (own + readable under yama).
+    pub proc_net: Vec<ProcNet>,
+}
+
+/// Per-process socket counts (TCP established/listening, UDP).
+#[derive(Clone, Serialize, Default)]
+pub struct ProcNet {
+    pub pid: u32,
+    pub tcp_est: u32,
+    pub tcp_listen: u32,
+    pub udp: u32,
 }
 
 pub struct NetMonitor {
@@ -126,6 +142,11 @@ pub struct NetMonitor {
     prev: HashMap<String, DevCounters>,
     prev_retrans: u64,
     snapshot: NetSnapshot,
+}
+impl Default for NetMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NetMonitor {
@@ -137,6 +158,7 @@ impl NetMonitor {
             snapshot: NetSnapshot {
                 ifaces: Vec::new(),
                 totals: NetTotals::default(),
+                proc_net: Vec::new(),
             },
         }
     }
@@ -186,6 +208,7 @@ impl NetMonitor {
                 tcp_established: established,
             },
             ifaces,
+            proc_net: proc_sockets(),
         };
         self.prev = cur;
         self.last_refresh = Some(now);
@@ -194,6 +217,102 @@ impl NetMonitor {
     pub fn snapshot(&self) -> NetSnapshot {
         self.snapshot.clone()
     }
+}
+
+/// Socket class from the `/proc/net/{tcp,tcp6,udp,udp6}` state field.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sock {
+    TcpEst,
+    TcpListen,
+    TcpOther,
+    Udp,
+}
+
+/// inode -> socket class, from the four /proc/net socket tables.
+fn socket_inodes() -> HashMap<u64, Sock> {
+    let mut out = HashMap::new();
+    for (path, udp) in [
+        ("/proc/net/tcp", false),
+        ("/proc/net/tcp6", false),
+        ("/proc/net/udp", true),
+        ("/proc/net/udp6", true),
+    ] {
+        let raw = std::fs::read_to_string(path).unwrap_or_default();
+        for line in raw.lines().skip(1) {
+            if let Some((inode, class)) = socket_line(line, udp) {
+                out.insert(inode, class);
+            }
+        }
+    }
+    out
+}
+
+/// TCP socket-table state hex codes (from net/tcp.h).
+const TCP_ESTABLISHED: &str = "01";
+const TCP_LISTEN: &str = "0A";
+
+/// (inode, class) from one `/proc/net/tcp`/`udp` line, when parseable.
+fn socket_line(line: &str, udp: bool) -> Option<(u64, Sock)> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let st = *fields.get(3)?;
+    // inode is field 9 (0-based) in both tcp and udp tables: sl local rem
+    // st tx:rx tr retrnsmt uid timeout inode refs ptr.
+    let inode = fields.get(9)?.parse::<u64>().ok()?;
+    let class = if udp {
+        Sock::Udp
+    } else {
+        match st {
+            TCP_ESTABLISHED => Sock::TcpEst,
+            TCP_LISTEN => Sock::TcpListen,
+            _ => Sock::TcpOther,
+        }
+    };
+    Some((inode, class))
+}
+
+/// Processes with open sockets, resolved by scanning /proc/<pid>/fd for
+/// `socket:[inode]` links. Only own (yama-visible) processes are readable.
+fn proc_sockets() -> Vec<ProcNet> {
+    let inodes = socket_inodes();
+    let mut per_pid: HashMap<u32, ProcNet> = HashMap::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for e in entries.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+                continue;
+            };
+            for fd in fds.flatten() {
+                let Ok(link) = std::fs::read_link(fd.path()) else {
+                    continue;
+                };
+                let s = link.to_string_lossy();
+                let Some(inode) = s
+                    .strip_prefix("socket:[")
+                    .and_then(|rest| rest.strip_suffix(']'))
+                    .and_then(|n| n.parse::<u64>().ok())
+                else {
+                    continue;
+                };
+                let Some(class) = inodes.get(&inode) else {
+                    continue;
+                };
+                let entry = per_pid.entry(pid).or_default();
+                entry.pid = pid;
+                match class {
+                    Sock::TcpEst => entry.tcp_est += 1,
+                    Sock::TcpListen => entry.tcp_listen += 1,
+                    Sock::Udp => entry.udp += 1,
+                    Sock::TcpOther => {}
+                }
+            }
+        }
+    }
+    let mut list: Vec<ProcNet> = per_pid.into_values().collect();
+    list.sort_by_key(|p| std::cmp::Reverse(p.tcp_est + p.tcp_listen + p.udp));
+    list.truncate(32);
+    list
 }
 
 #[cfg(test)]
@@ -234,6 +353,20 @@ mod tests {
         let (retrans, established) = tcp_stats_from(snmp, tcp);
         assert_eq!(retrans, 7);
         assert_eq!(established, 2);
+    }
+
+    #[test]
+    fn socket_line_parses_state_and_inode() {
+        let tcp_est = "  0: 0100007F:1F90 00000000:0000 01 00000000:00000000 00:00000000 00000000    30        0 12345 2 3\n";
+        let tcp_listen = "  1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000    30        0 99999 1 3\n";
+        let udp = "  2: 00000000:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000    30        0 77777 1 3\n";
+        assert_eq!(socket_line(tcp_est, false), Some((12345, Sock::TcpEst)));
+        assert_eq!(
+            socket_line(tcp_listen, false),
+            Some((99999, Sock::TcpListen))
+        );
+        assert_eq!(socket_line(udp, true), Some((77777, Sock::Udp)));
+        assert_eq!(socket_line("garbage", false), None);
     }
 
     #[test]

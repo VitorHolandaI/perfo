@@ -212,9 +212,11 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         }
         draw_status(frame, status_area, ui);
     } else {
-        // Dashboard: CPU, memory + disks, and the active pane stacked.
+        // Dashboard aggregates everything: CPU, memory + disks side by
+        // side, and the network table below. Numbers/Tab focus one pane
+        // fullscreen with more detail.
         let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
-        let [cpu_area, mid_area, proc_area, status_area] = Layout::vertical([
+        let [cpu_area, mid_area, net_area, status_area] = Layout::vertical([
             Constraint::Length(6 + core_lines as u16),
             Constraint::Length(7),
             Constraint::Min(0),
@@ -227,12 +229,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
                 .areas(mid_area);
         draw_mem(frame, mem_area, ui);
         draw_disks(frame, disk_area, ui);
-        match ui.pane {
-            Pane::Cpu => {}
-            Pane::Io => draw_io(frame, proc_area, ui),
-            Pane::Net => draw_net(frame, proc_area, ui),
-            Pane::Procs => draw_processes(frame, proc_area, ui),
-        }
+        draw_net(frame, net_area, ui);
         draw_status(frame, status_area, ui);
     }
     if ui.help {
@@ -852,6 +849,35 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(format!("{:>14}", link), Style::default().fg(ui.theme.fg)),
         ]));
+    }
+
+    // Processes with open sockets (own + readable under yama), like `ss -p`.
+    if !ui.snap.net.proc_net.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "PROCESSOS USANDO REDE (tcp est | listen | udp)",
+            Style::default().fg(ui.theme.accent),
+        )));
+        for p in ui.snap.net.proc_net.iter().take(8) {
+            let cmd = ui
+                .snap
+                .processes
+                .iter()
+                .find(|pr| pr.pid == p.pid)
+                .map(|pr| pr.cmd.clone())
+                .unwrap_or_default();
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:>7}", p.pid), Style::default().fg(ui.theme.muted)),
+                Span::styled(
+                    format!("  tcp {} | {} | udp {}  ", p.tcp_est, p.tcp_listen, p.udp),
+                    Style::default().fg(ui.theme.fg),
+                ),
+                Span::styled(
+                    truncate(&cmd, inner.width.saturating_sub(32) as usize),
+                    Style::default().fg(ui.theme.fg),
+                ),
+            ]));
+        }
     }
     frame.render_widget(Paragraph::new(lines), inner);
 }

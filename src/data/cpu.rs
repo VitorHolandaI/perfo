@@ -416,6 +416,12 @@ fn user_name_of(uid: u32) -> String {
     }
 }
 
+impl Default for CpuMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CpuMonitor {
     pub fn new() -> Self {
         // new_all() does a heavyweight first refresh (disks, net, users,
