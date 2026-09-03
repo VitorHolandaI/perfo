@@ -126,6 +126,9 @@ pub struct CpuSnapshot {
     pub io_history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
     /// Per-interface network rates + TCP totals.
     pub net: NetSnapshot,
+    /// Overall CPU usage ring (newest last) for the CPU history graph.
+    #[serde(skip)]
+    pub cpu_history: VecDeque<f32>,
     pub processes: Vec<ProcessInfo>,
 }
 
@@ -385,6 +388,8 @@ pub struct CpuMonitor {
     last_full: Option<Instant>,
     /// P/E/L classification, probed once via CPUID 0x1A (pinned threads).
     core_types: Vec<CoreType>,
+    /// Overall CPU usage ring (newest last) for the history graph.
+    history: VecDeque<f32>,
 }
 
 /// Resolve a uid to a username via NSS (getpwuid_r), "?" on failure.
@@ -446,6 +451,7 @@ impl CpuMonitor {
             stat_prev: (0, 0),
             last_full: None,
             core_types: core_types_of(),
+            history: VecDeque::new(),
         };
         // Seed CPU deltas so the first real refresh has a window to measure.
         monitor.refresh();
@@ -545,6 +551,10 @@ impl CpuMonitor {
         }
 
         let overall_percent = self.sys.global_cpu_usage();
+        self.history.push_back(overall_percent);
+        if self.history.len() > crate::data::disk::HISTORY_SAMPLES {
+            self.history.pop_front();
+        }
         // iowait needs a delta between two /proc/stat samples; stat_prev
         // holds the latest, so the first snapshot reports 0.
         let (iw, tot) = self.stat_prev;
@@ -643,6 +653,7 @@ impl CpuMonitor {
             io_history: self.disks.history().clone(),
             disks: self.disks.snapshot(),
             net: self.net.snapshot(),
+            cpu_history: self.history.clone(),
             processes,
         }
     }

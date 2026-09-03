@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -109,6 +109,11 @@ pub struct NetInfo {
     pub link_up: bool,
     pub total_rx_bytes: u64,
     pub total_tx_bytes: u64,
+    /// rx/tx rate rings (newest last) for the network sparklines.
+    #[serde(skip)]
+    pub rx_hist: VecDeque<f32>,
+    #[serde(skip)]
+    pub tx_hist: VecDeque<f32>,
 }
 
 #[derive(Clone, Serialize, Default)]
@@ -141,6 +146,8 @@ pub struct NetMonitor {
     last_refresh: Option<Instant>,
     prev: HashMap<String, DevCounters>,
     prev_retrans: u64,
+    /// Per-interface rx/tx rate rings for the sparklines.
+    history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
     snapshot: NetSnapshot,
 }
 impl Default for NetMonitor {
@@ -155,6 +162,7 @@ impl NetMonitor {
             last_refresh: None,
             prev: HashMap::new(),
             prev_retrans: 0,
+            history: HashMap::new(),
             snapshot: NetSnapshot {
                 ifaces: Vec::new(),
                 totals: NetTotals::default(),
@@ -176,10 +184,18 @@ impl NetMonitor {
             if let Some(p) = self.prev.get(name) {
                 let d = |a: u64, b: u64| b.saturating_sub(a);
                 let (link_mbps, link_up) = link_state(name);
+                let rx_bps = rate(d(p.0, c.0), elapsed);
+                let tx_bps = rate(d(p.4, c.4), elapsed);
+                let (rq, tq) = self
+                    .history
+                    .entry(name.clone())
+                    .or_insert_with(|| (VecDeque::new(), VecDeque::new()));
+                push_capped(rq, rx_bps as f32, super::disk::HISTORY_SAMPLES);
+                push_capped(tq, tx_bps as f32, super::disk::HISTORY_SAMPLES);
                 ifaces.push(NetInfo {
                     name: name.clone(),
-                    rx_bps: rate(d(p.0, c.0), elapsed),
-                    tx_bps: rate(d(p.4, c.4), elapsed),
+                    rx_bps,
+                    tx_bps,
                     rx_pps: rate(d(p.1, c.1), elapsed),
                     tx_pps: rate(d(p.5, c.5), elapsed),
                     rx_errs_s: rate(d(p.2, c.2), elapsed),
@@ -190,6 +206,8 @@ impl NetMonitor {
                     link_up,
                     total_rx_bytes: c.0,
                     total_tx_bytes: c.4,
+                    rx_hist: rq.clone(),
+                    tx_hist: tq.clone(),
                 });
             }
         }
@@ -216,6 +234,14 @@ impl NetMonitor {
 
     pub fn snapshot(&self) -> NetSnapshot {
         self.snapshot.clone()
+    }
+}
+
+/// Push into a capped ring buffer.
+fn push_capped(q: &mut VecDeque<f32>, v: f32, cap: usize) {
+    q.push_back(v);
+    if q.len() > cap {
+        q.pop_front();
     }
 }
 

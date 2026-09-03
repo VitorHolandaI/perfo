@@ -273,7 +273,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(block(&title, focused, &ui.theme), area);
     let inner = block(&title, focused, &ui.theme).inner(area);
     let [overall_area, cores_area] =
-        Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(5), Constraint::Min(0)]).areas(inner);
 
     let bar_w = overall_area.width.saturating_sub(26) as usize;
     let color = cpu_color(ui.snap.overall_percent, &ui.theme);
@@ -313,6 +313,16 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(
         Paragraph::new(vec![
             overall,
+            Line::from(vec![
+                Span::styled("history ", Style::default().fg(ui.theme.muted)),
+                Span::styled(
+                    sparkline(
+                        &ui.snap.cpu_history,
+                        20,
+                    ),
+                    Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
+                ),
+            ]),
             Line::from(Span::raw(format!("{mem}{temp}"))),
             legend,
         ]),
@@ -769,12 +779,12 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
         pipe(&format!(" {:<9}", "NET")),
         pipe("│"),
         Span::styled(
-            format!("{:>9}", format!("rx {}/s", short_bytes(totals.rx_bps))),
+            format!("{:>15}", format!("rx {}/s", short_bytes(totals.rx_bps))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            format!("{:>9}", format!("tx {}/s", short_bytes(totals.tx_bps))),
+            format!("{:>15}", format!("tx {}/s", short_bytes(totals.tx_bps))),
             Style::default().fg(ui.theme.yellow),
         ),
         pipe("│"),
@@ -797,9 +807,9 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
     lines.push(Line::from(vec![
         pipe(&format!(" {:<9}", "IFACE")),
         pipe("│"),
-        pipe(&format!("{:>9}", "RX/s")),
+        pipe(&format!("{:>15}", "RX/s")),
         pipe("│"),
-        pipe(&format!("{:>9}", "TX/s")),
+        pipe(&format!("{:>15}", "TX/s")),
         pipe("│"),
         pipe(&format!("{:>17}", "rx pps / tx pps")),
         pipe("│"),
@@ -828,12 +838,20 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             ),
             pipe("│"),
             Span::styled(
-                format!("{:>9}", format!("{}/s", short_bytes(i.rx_bps))),
+                format!(
+                    "{:<5} {:>9}",
+                    sparkline(&i.rx_hist, 5),
+                    format!("{}/s", short_bytes(i.rx_bps))
+                ),
                 Style::default().fg(ui.theme.accent),
             ),
             pipe("│"),
             Span::styled(
-                format!("{:>9}", format!("{}/s", short_bytes(i.tx_bps))),
+                format!(
+                    "{:<5} {:>9}",
+                    sparkline(&i.tx_hist, 5),
+                    format!("{}/s", short_bytes(i.tx_bps))
+                ),
                 Style::default().fg(ui.theme.yellow),
             ),
             pipe("│"),
