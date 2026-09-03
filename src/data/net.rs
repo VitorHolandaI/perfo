@@ -130,6 +130,8 @@ pub struct NetSnapshot {
     pub totals: NetTotals,
     /// Processes with open sockets (own + readable under yama).
     pub proc_net: Vec<ProcNet>,
+    /// Listening ports with the serving process.
+    pub listening: Vec<ListeningPort>,
 }
 
 /// Per-process socket counts (TCP established/listening, UDP).
@@ -139,6 +141,15 @@ pub struct ProcNet {
     pub tcp_est: u32,
     pub tcp_listen: u32,
     pub udp: u32,
+}
+
+/// A listening port with the process serving it.
+#[derive(Clone, Serialize)]
+pub struct ListeningPort {
+    pub port: u16,
+    pub proto: String,
+    pub pid: u32,
+    pub cmd: String,
 }
 
 pub struct NetMonitor {
@@ -167,6 +178,7 @@ impl NetMonitor {
                 ifaces: Vec::new(),
                 totals: NetTotals::default(),
                 proc_net: Vec::new(),
+                listening: Vec::new(),
             },
         }
     }
@@ -227,6 +239,7 @@ impl NetMonitor {
             },
             ifaces,
             proc_net: proc_sockets(),
+            listening: listening_ports(),
         };
         self.prev = cur;
         self.last_refresh = Some(now);
@@ -339,6 +352,118 @@ fn proc_sockets() -> Vec<ProcNet> {
     list.sort_by_key(|p| std::cmp::Reverse(p.tcp_est + p.tcp_listen + p.udp));
     list.truncate(32);
     list
+}
+
+/// (inode, port, proto, uid) from listening entries across the four proc files.
+fn listening_sockets() -> Vec<(u64, u16, String, u32)> {
+    let mut out = Vec::new();
+    for (path, proto) in [
+        ("/proc/net/tcp", "tcp"),
+        ("/proc/net/tcp6", "tcp6"),
+        ("/proc/net/udp", "udp"),
+        ("/proc/net/udp6", "udp6"),
+    ] {
+        let raw = std::fs::read_to_string(path).unwrap_or_default();
+        for line in raw.lines().skip(1) {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 {
+                continue;
+            }
+            let st = fields[3];
+            if !proto.starts_with("udp") && st != TCP_LISTEN {
+                continue;
+            }
+            let local = fields[1];
+            let port_hex = local.split(':').nth(1).unwrap_or("0");
+            let port = u16::from_str_radix(port_hex, 16).unwrap_or(0);
+            if port == 0 {
+                continue;
+            }
+            let inode = match fields[9].parse::<u64>() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let uid = fields
+                .get(7)
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            out.push((inode, port, proto.to_string(), uid));
+        }
+    }
+    out
+}
+
+/// Discover listening ports, PID (when readable), and cmdline.
+fn listening_ports() -> Vec<ListeningPort> {
+    let sockets = listening_sockets();
+    if sockets.is_empty() {
+        return Vec::new();
+    }
+    // Build inode → (port, proto, uid) lookup.
+    let mut inode_map: HashMap<u64, (u16, String, u32)> = HashMap::new();
+    for (inode, port, proto, uid) in &sockets {
+        inode_map
+            .entry(*inode)
+            .or_insert((*port, proto.clone(), *uid));
+    }
+    // Scan /proc/<pid>/fd for matching socket inodes.
+    let mut pid_map: HashMap<u64, u32> = HashMap::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for e in entries.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
+                continue;
+            };
+            for fd in fds.flatten() {
+                let Ok(link) = std::fs::read_link(fd.path()) else {
+                    continue;
+                };
+                let s = link.to_string_lossy();
+                let Some(inode) = s
+                    .strip_prefix("socket:[")
+                    .and_then(|rest| rest.strip_suffix(']'))
+                    .and_then(|n| n.parse::<u64>().ok())
+                else {
+                    continue;
+                };
+                if inode_map.contains_key(&inode) {
+                    pid_map.entry(inode).or_insert(pid);
+                }
+            }
+        }
+    }
+    // Build result: one entry per (port, proto) pair, preferring known PID.
+    let mut by_key: HashMap<(u16, String, u32), Vec<u32>> = HashMap::new();
+    for (inode, port, proto, uid) in &sockets {
+        let pid = pid_map.get(inode).copied().unwrap_or(0);
+        by_key
+            .entry((*port, proto.clone(), *uid))
+            .or_default()
+            .push(pid);
+    }
+    let mut result: Vec<ListeningPort> = by_key
+        .into_iter()
+        .map(|((port, proto, uid), pids)| {
+            let best_pid = pids.into_iter().max().unwrap_or(0);
+            let cmd = if best_pid != 0 {
+                std::fs::read_to_string(format!("/proc/{best_pid}/cmdline"))
+                    .unwrap_or_default()
+                    .replace('\0', " ")
+            } else {
+                format!("(uid {uid})")
+            };
+            ListeningPort {
+                port,
+                proto,
+                pid: best_pid,
+                cmd,
+            }
+        })
+        .collect();
+    result.sort_by_key(|p| p.port);
+    result
 }
 
 #[cfg(test)]

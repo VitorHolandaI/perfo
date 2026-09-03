@@ -156,33 +156,34 @@ fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk
         .collect()
 }
 
-/// Mini trend graph: the ring's samples bucketed down to `width` columns,
-/// scaled to the bucket max. Empty history renders as spaces.
+/// Trend graph: samples bucketed to `width` columns, scaled to the
+/// absolute 0-100 range. Oldest left, newest right. Right-padded when
+/// fewer samples than width (graph grows from the left).
 fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
     const CHARS: [char; 9] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '█'];
     if samples.is_empty() {
         return " ".repeat(width);
     }
-    let bucket = samples.len().div_ceil(width);
+    let bucket_t = samples.len().div_ceil(width);
+    let bucket_n = bucket_t.max(1);
     let mut vals: Vec<f32> = Vec::new();
     let mut sum = 0.0;
     let mut cnt = 0usize;
     for (i, v) in samples.iter().enumerate() {
         sum += v;
         cnt += 1;
-        if (i + 1) % bucket == 0 || i == samples.len() - 1 {
+        if (i + 1) % bucket_n == 0 || i == samples.len() - 1 {
             vals.push(sum / cnt as f32);
             sum = 0.0;
             cnt = 0;
         }
     }
-    let max = vals.iter().copied().fold(0.0f32, f32::max).max(0.001);
     let line: String = vals
         .iter()
-        .map(|v| CHARS[((v / max * 8.0) as usize).min(8)])
+        .map(|v| CHARS[((v / 100.0 * 8.0) as usize).min(8)])
         .collect();
     if line.len() < width {
-        format!("{}{}", " ".repeat(width - line.len()), line)
+        format!("{:<width$}", line, width = width)
     } else {
         line
     }
@@ -316,10 +317,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
             Line::from(vec![
                 Span::styled("history ", Style::default().fg(ui.theme.muted)),
                 Span::styled(
-                    sparkline(
-                        &ui.snap.cpu_history,
-                        20,
-                    ),
+                    sparkline(&ui.snap.cpu_history, bar_w.min(100)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
                 ),
             ]),
@@ -608,9 +606,9 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
         pipe("│"),
         pipe(&format!("{:>4}", "temp")),
         pipe("│"),
-        pipe(&format!("{:>14}", "READ")),
+        pipe(&format!("{:>20}", "READ")),
         pipe("│"),
-        pipe(&format!("{:>14}", "WRITE")),
+        pipe(&format!("{:>20}", "WRITE")),
         pipe("│"),
         pipe(&format!(" {:<8}", "MOUNT")),
     ]));
@@ -666,8 +664,8 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(
                 format!(
-                    " {:<5} {:>6}/s",
-                    sparkline(&rhist, 5),
+                    " {:<10} {:>6}/s",
+                    sparkline(&rhist, 10),
                     short_bytes(d.read_bps)
                 ),
                 Style::default().fg(ui.theme.accent),
@@ -779,12 +777,12 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
         pipe(&format!(" {:<9}", "NET")),
         pipe("│"),
         Span::styled(
-            format!("{:>15}", format!("rx {}/s", short_bytes(totals.rx_bps))),
+            format!("{:>20}", format!("rx {}/s", short_bytes(totals.rx_bps))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            format!("{:>15}", format!("tx {}/s", short_bytes(totals.tx_bps))),
+            format!("{:>20}", format!("tx {}/s", short_bytes(totals.tx_bps))),
             Style::default().fg(ui.theme.yellow),
         ),
         pipe("│"),
@@ -807,9 +805,9 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
     lines.push(Line::from(vec![
         pipe(&format!(" {:<9}", "IFACE")),
         pipe("│"),
-        pipe(&format!("{:>15}", "RX/s")),
+        pipe(&format!("{:>20}", "RX/s")),
         pipe("│"),
-        pipe(&format!("{:>15}", "TX/s")),
+        pipe(&format!("{:>20}", "TX/s")),
         pipe("│"),
         pipe(&format!("{:>17}", "rx pps / tx pps")),
         pipe("│"),
@@ -839,8 +837,8 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(
                 format!(
-                    "{:<5} {:>9}",
-                    sparkline(&i.rx_hist, 5),
+                    "{:<10} {:>9}",
+                    sparkline(&i.rx_hist, 10),
                     format!("{}/s", short_bytes(i.rx_bps))
                 ),
                 Style::default().fg(ui.theme.accent),
@@ -848,8 +846,8 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(
                 format!(
-                    "{:<5} {:>9}",
-                    sparkline(&i.tx_hist, 5),
+                    "{:<10} {:>9}",
+                    sparkline(&i.tx_hist, 10),
                     format!("{}/s", short_bytes(i.tx_bps))
                 ),
                 Style::default().fg(ui.theme.yellow),
@@ -892,6 +890,38 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
                 ),
                 Span::styled(
                     truncate(&cmd, inner.width.saturating_sub(32) as usize),
+                    Style::default().fg(ui.theme.fg),
+                ),
+            ]));
+        }
+    }
+
+    // Listening ports (only in fullscreen).
+    if focused && !ui.snap.net.listening.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "PORTAS ABERTAS (ouvindo)",
+            Style::default().fg(ui.theme.accent),
+        )));
+        for lp in ui.snap.net.listening.iter().take(20) {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:>5}", lp.port),
+                    Style::default().fg(ui.theme.yellow),
+                ),
+                Span::styled(
+                    format!(" / {:<4}", lp.proto),
+                    Style::default().fg(ui.theme.muted),
+                ),
+                Span::styled(
+                    format!(" {:>7}", lp.pid),
+                    Style::default().fg(ui.theme.muted),
+                ),
+                Span::styled(
+                    format!(
+                        "  {}",
+                        truncate(&lp.cmd, inner.width.saturating_sub(27) as usize)
+                    ),
                     Style::default().fg(ui.theme.fg),
                 ),
             ]));
@@ -1155,10 +1185,11 @@ mod tests {
         for v in [0.0, 0.0, 100.0, 0.0, 0.0, 0.0] {
             q.push_back(v);
         }
-        // 6 samples into 2 buckets: [0,0,100] and [0,0,0].
+        // 6 samples into 2 buckets: [0,0,100] avg 33.3, [0,0,0] avg 0.
+        // Absolute scale to 100: 33.3/100*8=2 → ▃, 0 → ▁.
         let s = sparkline(&q, 2);
         assert_eq!(s.chars().count(), 2);
-        assert_eq!(s, "█▁");
+        assert_eq!(s, "▃▁");
         assert_eq!(sparkline(&VecDeque::new(), 3), "   ");
     }
 
