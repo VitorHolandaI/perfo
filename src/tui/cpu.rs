@@ -29,7 +29,7 @@ pub enum SortKey {
     Mem,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pane {
     Cpu,
     Io,

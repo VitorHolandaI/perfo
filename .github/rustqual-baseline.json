@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.06422873834400578,
-  "iosp_score": 0.9689922480620154,
+  "quality_score": 0.07345556813616261,
+  "iosp_score": 0.9694656488549618,
   "violations": 4,
-  "total": 207,
+  "total": 209,
   "complexity_warnings": 7,
   "magic_number_warnings": 94,
   "nesting_depth_warnings": 3,
@@ -38,17 +38,17 @@
     {
       "name": "run_loop",
       "file": "src/tui/mod.rs",
-      "line": 91
+      "line": 95
     },
     {
       "name": "prepare",
       "file": "src/tui/mod.rs",
-      "line": 191
+      "line": 195
     },
     {
       "name": "build_tree",
       "file": "src/tui/mod.rs",
-      "line": 243
+      "line": 247
     }
   ]
 }

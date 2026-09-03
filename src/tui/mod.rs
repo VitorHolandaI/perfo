@@ -51,6 +51,9 @@ struct State {
     kill_prompt: bool,
     status_msg: Option<String>,
     pane: Pane,
+    /// Pane before the last switch; pressing the focused pane's number
+    /// again returns to it (tmux-style toggle).
+    prev_pane: Option<Pane>,
     paused: bool,
     use_system_theme: bool,
     lang: Lang,
@@ -77,6 +80,7 @@ impl Default for State {
             kill_prompt: false,
             status_msg: None,
             pane: Pane::Procs,
+            prev_pane: None,
             paused: false,
             use_system_theme: true,
             lang: Lang::Pt,
@@ -426,6 +430,7 @@ fn handle_normal_key(
             }
         }
         KeyCode::Tab | KeyCode::BackTab => {
+            state.prev_pane = Some(state.pane);
             state.pane = match state.pane {
                 Pane::Cpu => Pane::Io,
                 Pane::Io => Pane::Net,
@@ -469,6 +474,22 @@ fn handle_normal_key(
             state.show_kernel = !state.show_kernel;
             false
         }
+        KeyCode::Char('1') => {
+            focus_pane(state, Pane::Cpu);
+            false
+        }
+        KeyCode::Char('2') => {
+            focus_pane(state, Pane::Io);
+            false
+        }
+        KeyCode::Char('3') => {
+            focus_pane(state, Pane::Net);
+            false
+        }
+        KeyCode::Char('4') => {
+            focus_pane(state, Pane::Procs);
+            false
+        }
         KeyCode::Char('C') => toggle_theme(state, system_theme),
         KeyCode::Char('L') => toggle_lang(state),
         KeyCode::Char('?') => {
@@ -498,6 +519,21 @@ fn handle_normal_key(
         }
         KeyCode::Enter | KeyCode::Char(' ') => toggle_core_filter(state),
         _ => false,
+    }
+}
+
+/// Jump to `target`; pressing the focused pane's number again returns to
+/// the previous one (tmux-style window toggle).
+fn focus_pane(state: &mut State, target: Pane) {
+    if state.pane == target {
+        if let Some(prev) = state.prev_pane {
+            let cur = state.pane;
+            state.pane = prev;
+            state.prev_pane = Some(cur);
+        }
+    } else {
+        state.prev_pane = Some(state.pane);
+        state.pane = target;
     }
 }
 
@@ -620,10 +656,10 @@ fn status_line(state: &State) -> String {
         return format!("core {c} — Enter (mesmo nucleo) ou Esc volta pra TODOS os processos");
     }
     let pane = match state.pane {
-        Pane::Cpu => "[CPU pane] ",
-        Pane::Io => "[IO pane] ",
-        Pane::Net => "[NET pane] ",
-        Pane::Procs => "[PROCS pane] ",
+        Pane::Cpu => "[1:CPU pane] ",
+        Pane::Io => "[2:IO pane] ",
+        Pane::Net => "[3:NET pane] ",
+        Pane::Procs => "[4:PROCS pane] ",
     };
     format!(
         "{pane}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L lang | ? help",
@@ -759,6 +795,24 @@ mod tests {
     }
 
     #[test]
+    fn pane_numbers_focus_and_toggle_back() {
+        let mut s = State::default();
+        assert_eq!(s.pane, Pane::Procs);
+        // 1 foca CPU; repetir 1 volta pro Procs (anterior).
+        handle_key(&mut s, &[], KeyCode::Char('1'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Cpu);
+        handle_key(&mut s, &[], KeyCode::Char('1'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Procs);
+        // 2 foca IO; Tab muda pra NET; repetir 3 volta pro IO.
+        handle_key(&mut s, &[], KeyCode::Char('2'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Io);
+        handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Net);
+        handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Io);
+    }
+
+    #[test]
     fn lang_toggles_between_pt_and_en() {
         let mut s = State::default();
         assert_eq!(s.lang, Lang::Pt);
@@ -857,7 +911,7 @@ mod tests {
     #[test]
     fn status_line_shows_context() {
         let mut s = State::default();
-        assert!(status_line(&s).contains("[PROCS pane]"));
+        assert!(status_line(&s).contains("[4:PROCS pane]"));
         s.paused = true;
         assert!(status_line(&s).contains("PAUSED"));
         s.core_filter = Some(3);

@@ -84,6 +84,8 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
             &[
                 hdr("PAINEIS — Tab alterna"),
                 key("Tab", "alterna: Processos → CPU → IO → NET"),
+                key("1-4", "focam o painel (1 CPU · 2 IO · 3 NET · 4 PROC);"),
+                key("", "repetir o numero do painel em foco volta ao anterior"),
                 key("← →", "no painel CPU: move o nucleo focado"),
                 key("Enter", "filtra os processos do nucleo focado (Esc volta)"),
                 key("↑ ↓", "selecionam processo; PgUp/PgDn/Home/End pulam"),
@@ -105,6 +107,8 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
             &[
                 hdr("PAGES — Tab cycles"),
                 key("Tab", "cycles: Procs → CPU → IO → NET"),
+                key("1-4", "focus a pane (1 CPU · 2 IO · 3 NET · 4 PROC);"),
+                key("", "repeat the focused pane's number to return to previous"),
                 key("← →", "CPU pane: move the focused core"),
                 key("Enter", "filter processes of the focused core (Esc clears)"),
                 key("↑ ↓", "select a process; PgUp/PgDn/Home/End jump"),
