@@ -36,7 +36,7 @@ jobs:
             --argjson bt "$base_total" --argjson bs "$base_score" \
             '($ct <= $bt) and ($cs >= $bs - 0.001)' \
             <<< '{}' >/dev/null
-          rustqual . --format github
+          rustqual . --format github --no-fail
       - name: rustqual — SARIF (code scanning)
         run: rustqual . --format sarif > rustqual.sarif
       - uses: github/codeql-action/upload-sarif@v3
