@@ -160,12 +160,41 @@ fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk
 /// absolute 0-100 range. Oldest left, newest right. Right-padded when
 /// fewer samples than width (graph grows from the left).
 fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
-    const CHARS: [char; 9] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '█'];
+    const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
     if samples.is_empty() {
         return " ".repeat(width);
     }
-    let bucket_t = samples.len().div_ceil(width);
-    let bucket_n = bucket_t.max(1);
+    let bucket_n = samples.len().div_ceil(width).max(1);
+    let mut vals: Vec<f32> = Vec::new();
+    let mut sum = 0.0;
+    let mut cnt = 0usize;
+    for (i, v) in samples.iter().enumerate() {
+        sum += v;
+        cnt += 1;
+        if (i + 1) % bucket_n == 0 || i == samples.len() - 1 {
+            vals.push(sum / cnt as f32);
+            sum = 0.0;
+            cnt = 0;
+        }
+    }
+    let line: String = vals
+        .iter()
+        .map(|v| CHARS[((v / 100.0 * 8.0) as usize).min(8)])
+        .collect();
+    if line.len() < width {
+        format!("{:<width$}", line, width = width)
+    } else {
+        line
+    }
+}
+
+/// Braille sparkline with coarser buckets (smoother trend line).
+fn sparkline_smooth(samples: &VecDeque<f32>, width: usize) -> String {
+    const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
+    if samples.is_empty() || width < 2 {
+        return " ".repeat(width);
+    }
+    let bucket_n = (samples.len() / width).max(2);
     let mut vals: Vec<f32> = Vec::new();
     let mut sum = 0.0;
     let mut cnt = 0usize;
@@ -218,7 +247,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         // fullscreen with more detail.
         let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
         let [cpu_area, mid_area, net_area, status_area] = Layout::vertical([
-            Constraint::Length(6 + core_lines as u16),
+            Constraint::Length(8 + core_lines as u16),
             Constraint::Length(7),
             Constraint::Min(0),
             Constraint::Length(1),
@@ -242,7 +271,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
 fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
     let [cpu_area, mid_area, _rest] = Layout::vertical([
-        Constraint::Length(6 + core_lines as u16),
+        Constraint::Length(8 + core_lines as u16),
         Constraint::Length(7),
         Constraint::Min(0),
     ])
@@ -274,7 +303,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(block(&title, focused, &ui.theme), area);
     let inner = block(&title, focused, &ui.theme).inner(area);
     let [overall_area, cores_area] =
-        Layout::vertical([Constraint::Length(5), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(8), Constraint::Min(0)]).areas(inner);
 
     let bar_w = overall_area.width.saturating_sub(26) as usize;
     let color = cpu_color(ui.snap.overall_percent, &ui.theme);
@@ -315,9 +344,16 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
         Paragraph::new(vec![
             overall,
             Line::from(vec![
-                Span::styled("history ", Style::default().fg(ui.theme.muted)),
+                Span::styled("detalhe  ", Style::default().fg(ui.theme.muted)),
                 Span::styled(
                     sparkline(&ui.snap.cpu_history, bar_w.min(100)),
+                    Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("tendencia", Style::default().fg(ui.theme.muted)),
+                Span::styled(
+                    sparkline_smooth(&ui.snap.cpu_history, bar_w.min(100)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
                 ),
             ]),
@@ -326,16 +362,18 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
         ]),
         overall_area,
     );
+    draw_cores(frame, cores_area, ui);
+}
 
+fn draw_cores(frame: &mut Frame, area: Rect, ui: &Ui) {
     let n = ui.snap.per_core.len().min(MAX_CORE_ROWS);
-    let two_per_line = cores_area.width >= 60;
+    let two_per_line = area.width >= 60;
     let bar_w = if two_per_line {
-        (cores_area.width.saturating_sub(1) / 2).saturating_sub(25) as usize
+        (area.width.saturating_sub(1) / 2).saturating_sub(25) as usize
     } else {
-        cores_area.width.saturating_sub(29) as usize
+        area.width.saturating_sub(29) as usize
     };
     let bar_w = bar_w.max(1);
-
     let mut lines: Vec<Line> = Vec::new();
     let mut i = 0;
     while i < n {
@@ -366,7 +404,6 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
                 _ => ui.theme.muted,
             };
             let cur_mhz = ui.snap.per_core_freq_mhz.get(i).copied().unwrap_or(0);
-            // No cpufreq/scaling driver -> unknown frequency, show a dash.
             let freq = if cur_mhz > 0 {
                 ghz(cur_mhz)
             } else {
@@ -398,7 +435,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
         }
         lines.push(Line::from(spans));
     }
-    frame.render_widget(Paragraph::new(lines), cores_area);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
@@ -977,10 +1014,21 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         draw_trace(frame, area, ui);
         return;
     }
-    let title = if ui.tree { "4:PROCS (tree)" } else { "4:PROCS" };
+    let title = match (ui.tree, ui.core_filter) {
+        (true, Some(c)) => format!("4:PROCS — core {c} (tree)"),
+        (false, Some(c)) => format!("4:PROCS — core {c}"),
+        (true, None) => "4:PROCS (tree)".to_string(),
+        (false, None) => "4:PROCS".to_string(),
+    };
     let focused = ui.pane == Pane::Procs;
-    frame.render_widget(block(title, focused, &ui.theme), area);
-    let inner = block(title, focused, &ui.theme).inner(area);
+    frame.render_widget(block(&title, focused, &ui.theme), area);
+    let inner = block(&title, focused, &ui.theme).inner(area);
+
+    // Split: cores at top, process table below.
+    let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2) as u16;
+    let [cores_area, table_area] =
+        Layout::vertical([Constraint::Length(core_lines), Constraint::Min(0)]).areas(inner);
+    draw_cores(frame, cores_area, ui);
 
     let widths = [
         Constraint::Length(8),
@@ -1045,7 +1093,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         .column_spacing(1)
         .row_highlight_style(Style::default().bg(ui.theme.selection))
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(table, inner, &mut ts);
+    frame.render_stateful_widget(table, table_area, &mut ts);
 }
 
 fn draw_trace(frame: &mut Frame, area: Rect, ui: &Ui) {
@@ -1186,10 +1234,10 @@ mod tests {
             q.push_back(v);
         }
         // 6 samples into 2 buckets: [0,0,100] avg 33.3, [0,0,0] avg 0.
-        // Absolute scale to 100: 33.3/100*8=2 → ▃, 0 → ▁.
+        // Absolute scale to 100: 33.3/100*8=2.66→⡆, 0→⡀.
         let s = sparkline(&q, 2);
         assert_eq!(s.chars().count(), 2);
-        assert_eq!(s, "▃▁");
+        assert_eq!(s, "⡆⡀");
         assert_eq!(sparkline(&VecDeque::new(), 3), "   ");
     }
 

@@ -513,7 +513,7 @@ fn handle_normal_key(
         | KeyCode::Home
         | KeyCode::End => handle_nav_key(state, display_pids, code),
         KeyCode::Left | KeyCode::Right => {
-            if state.pane == Pane::Cpu {
+            if state.pane == Pane::Cpu || state.pane == Pane::Procs {
                 move_core(state, code);
             }
             false
