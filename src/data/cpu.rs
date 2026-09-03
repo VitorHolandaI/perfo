@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -33,6 +33,10 @@ pub struct ProcessInfo {
     /// (yama/other-user) or idle.
     pub read_bps: u64,
     pub write_bps: u64,
+    /// Bytes reaching the storage layer in the current window (see
+    /// IO_WINDOW_SECS); "who hammered the disk lately".
+    pub win_read_bytes: u64,
+    pub win_write_bytes: u64,
 }
 
 /// Parses /proc/<pid>/io: (read_bytes, write_bytes) — bytes that actually
@@ -119,6 +123,8 @@ pub struct CpuSnapshot {
     /// PSI I/O pressure "some" (10s/60s/300s) from /proc/pressure/io.
     pub io_pressure_some: [f64; 3],
     pub disks: Vec<DiskInfo>,
+    /// Per-device read/write rate rings (newest last) for IO sparklines.
+    pub io_history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
     pub processes: Vec<ProcessInfo>,
 }
 
@@ -270,6 +276,10 @@ pub struct CpuMonitor {
     io_prev: HashMap<u32, (u64, u64)>,
     /// pid -> bytes/second, computed on full refreshes.
     io_rates: HashMap<u32, (u64, u64)>,
+    /// pid -> bytes accumulated since the window started (see IO_WINDOW_SECS).
+    io_window: HashMap<u32, (u64, u64)>,
+    /// When the current I/O window started.
+    io_window_start: Instant,
     /// (iowait, total) counters from the previous /proc/stat read.
     stat_prev: (u64, u64),
     /// When the last full refresh happened (drives I/O rate conversion).
@@ -323,6 +333,8 @@ impl CpuMonitor {
             last_cpu: HashMap::new(),
             io_prev: HashMap::new(),
             io_rates: HashMap::new(),
+            io_window: HashMap::new(),
+            io_window_start: Instant::now(),
             stat_prev: (0, 0),
             last_full: None,
         };
@@ -383,6 +395,17 @@ impl CpuMonitor {
             }
         }
         self.last_cpu = m;
+        // Rolling per-process window: reset every IO_WINDOW_SECS so the
+        // "who hammered the disk" list is a bounded recent history.
+        if now.duration_since(self.io_window_start).as_secs() >= IO_WINDOW_SECS {
+            self.io_window.clear();
+            self.io_window_start = now;
+        }
+        for (pid, (rb, wb)) in io_rates.iter() {
+            let e = self.io_window.entry(*pid).or_insert((0, 0));
+            e.0 = e.0.saturating_add(rb.saturating_mul(elapsed as u64));
+            e.1 = e.1.saturating_add(wb.saturating_mul(elapsed as u64));
+        }
         self.io_prev = io_cur;
         self.io_rates = io_rates;
         let stat = std::fs::read_to_string("/proc/stat").unwrap_or_default();
@@ -470,6 +493,8 @@ impl CpuMonitor {
                         .join(" ")
                 };
                 let (read_bps, write_bps) = self.io_rates.get(&pid_u).copied().unwrap_or((0, 0));
+                let (win_read_bytes, win_write_bytes) =
+                    self.io_window.get(&pid_u).copied().unwrap_or((0, 0));
                 ProcessInfo {
                     pid: pid_u,
                     ppid: p.parent().map(|pp| pp.as_u32()),
@@ -482,6 +507,8 @@ impl CpuMonitor {
                     last_cpu: self.last_cpu.get(&pid_u).copied(),
                     read_bps,
                     write_bps,
+                    win_read_bytes,
+                    win_write_bytes,
                 }
             })
             .collect();
@@ -503,6 +530,7 @@ impl CpuMonitor {
             used_mem_bytes: self.sys.used_memory(),
             mem: mem::snapshot(),
             io_pressure_some: self.disks.io_pressure(),
+            io_history: self.disks.history().clone(),
             disks: self.disks.snapshot(),
             processes,
         }
@@ -522,6 +550,9 @@ fn rate_bps(delta: u64, elapsed_secs: f32) -> u64 {
 pub fn wait_sample_interval() {
     std::thread::sleep(Duration::from_millis(1000));
 }
+
+/// Length of the per-process I/O accumulation window (seconds).
+const IO_WINDOW_SECS: u64 = 300;
 
 #[cfg(test)]
 mod tests {

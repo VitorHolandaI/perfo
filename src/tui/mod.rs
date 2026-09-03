@@ -651,6 +651,8 @@ mod tests {
             last_cpu: None,
             read_bps: 0,
             write_bps: 0,
+            win_read_bytes: 0,
+            win_write_bytes: 0,
         }
     }
 

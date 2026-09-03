@@ -1,39 +1,44 @@
 {
   "version": 2,
   "quality_score": 0.0,
-  "iosp_score": 0.9642857142857143,
-  "violations": 4,
-  "total": 174,
+  "iosp_score": 0.9495798319327731,
+  "violations": 6,
+  "total": 187,
   "complexity_warnings": 7,
-  "magic_number_warnings": 75,
+  "magic_number_warnings": 85,
   "nesting_depth_warnings": 3,
-  "function_length_warnings": 10,
+  "function_length_warnings": 11,
   "unsafe_warnings": 10,
   "error_handling_warnings": 2,
-  "duplicate_groups": 2,
+  "duplicate_groups": 4,
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
   "boilerplate_warnings": 1,
   "srp_struct_warnings": 0,
-  "srp_module_warnings": 6,
+  "srp_module_warnings": 7,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
   "coupling_cycles": 0,
   "tq_no_assertion_warnings": 0,
   "tq_no_sut_warnings": 0,
-  "tq_untested_warnings": 61,
+  "tq_untested_warnings": 62,
   "tq_uncovered_warnings": 0,
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 186,
+  "total_findings": 203,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
-      "line": 352
+      "line": 364
+    },
+    {
+      "name": "DiskMonitor::refresh",
+      "file": "src/data/disk.rs",
+      "line": 231
     },
     {
       "name": "run_loop",
@@ -49,6 +54,11 @@
       "name": "build_tree",
       "file": "src/tui/mod.rs",
       "line": 243
+    },
+    {
+      "name": "main",
+      "file": "src/main.rs",
+      "line": 80
     }
   ]
 }

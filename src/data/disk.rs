@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -29,6 +30,12 @@ pub struct DiskIoStats {
     /// Average request size in KiB: 128+ = sequential, 4-16 = random.
     pub read_req_kib: f32,
     pub write_req_kib: f32,
+    /// TRIM/discard operations per second (NVMe + fstrim.timer).
+    pub d_s: u64,
+    /// Average discard size in KiB (small discards = fragmented fstrim).
+    pub discard_req_kib: f32,
+    /// fsync/fdatasync completions per second (DB commit cadence).
+    pub flush_s: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -47,6 +54,8 @@ pub struct DiskInfo {
     /// Cumulative bytes read since boot (from /proc/diskstats).
     pub total_read_bytes: u64,
     pub total_written_bytes: u64,
+    /// NVMe/SATA device temperature in °C (from hwmon), when available.
+    pub temp_c: Option<f32>,
     #[serde(flatten)]
     pub io: DiskIoStats,
 }
@@ -73,17 +82,21 @@ struct RawCounters {
     ms_writing: u64,
     ms_doing_io: u64,
     ms_weighted_io: u64,
+    discards: u64,
+    discard_sectors: u64,
+    flushes: u64,
 }
 
 /// Parses /proc/diskstats lines keyed by device name. Discard/flush fields
-/// (kernel 4.18+/5.5+) are ignored — they do not drive the metrics we show.
+/// (kernel 4.18+/5.5+) feed d_s/flush_s; the merged-discard and discard-ms
+/// fields are still skipped.
 fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
     let mut out = HashMap::new();
     for line in raw.lines() {
         let mut f = line.split_whitespace();
         let (_major, _minor, name) = (f.next(), f.next(), f.next());
         let Some(name) = name else { continue };
-        let mut n = [0u64; 11];
+        let mut n = [0u64; 14];
         let mut ok = true;
         for slot in n.iter_mut() {
             match f.next().and_then(|v| v.parse().ok()) {
@@ -110,6 +123,9 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
                 ms_writing: n[7],
                 ms_doing_io: n[9],
                 ms_weighted_io: n[10],
+                discards: n[11],
+                discard_sectors: n[12],
+                flushes: n[13],
             },
         );
     }
@@ -165,8 +181,23 @@ fn io_stats_from(prev: &RawCounters, cur: &RawCounters, elapsed_secs: f32) -> Di
         } else {
             0.0
         },
+        d_s: rate(d(prev.discards, cur.discards), e),
+        discard_req_kib: {
+            let discards = d(prev.discards, cur.discards);
+            if discards > 0 {
+                d(prev.discard_sectors, cur.discard_sectors) as f32 * 512.0
+                    / 1024.0
+                    / discards as f32
+            } else {
+                0.0
+            }
+        },
+        flush_s: rate(d(prev.flushes, cur.flushes), e),
     }
 }
+
+/// Ring-buffer depth for per-disk rate sparklines (~2 min at 1s refresh).
+pub const HISTORY_SAMPLES: usize = 120;
 
 pub struct DiskMonitor {
     disks: Disks,
@@ -176,6 +207,12 @@ pub struct DiskMonitor {
     io_stats: HashMap<String, DiskIoStats>,
     /// PSI "some" I/O pressure (10s/60s/300s) from /proc/pressure/io.
     io_pressure: [f64; 3],
+    /// friendly dm name -> dm-N (e.g. "root" -> "dm-0"); dm-N is what
+    /// exists under /sys/block for temperature lookups.
+    dm_aliases: HashMap<String, String>,
+    /// Per-device read/write byte-rate history (diskstats-derived), newest
+    /// last; feeds the sparklines in the IO pane.
+    history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
 }
 
 impl DiskMonitor {
@@ -186,6 +223,8 @@ impl DiskMonitor {
             prev_stats: HashMap::new(),
             io_stats: HashMap::new(),
             io_pressure: [0.0; 3],
+            dm_aliases: HashMap::new(),
+            history: HashMap::new(),
         }
     }
 
@@ -202,19 +241,23 @@ impl DiskMonitor {
         let cur = diskstats_from(&raw);
         // device-mapper devices show as dm-N; resolve to the friendly name
         // (e.g. dm-0 -> "root") so they match sysinfo's /dev/mapper/root.
+        let mut dm_aliases = HashMap::new();
         let cur: HashMap<String, RawCounters> = cur
             .into_iter()
             .map(|(dev, counters)| {
                 let key = if let Some(n) = dev.strip_prefix("dm-") {
-                    std::fs::read_to_string(format!("/sys/block/dm-{n}/dm/name"))
+                    let friendly = std::fs::read_to_string(format!("/sys/block/dm-{n}/dm/name"))
                         .map(|s| s.trim().to_string())
-                        .unwrap_or(dev.clone())
+                        .unwrap_or(dev.clone());
+                    dm_aliases.insert(friendly.clone(), dev.clone());
+                    friendly
                 } else {
                     dev.clone()
                 };
                 (key, counters)
             })
             .collect();
+        self.dm_aliases = dm_aliases;
         self.io_stats = cur
             .iter()
             .filter_map(|(name, c)| {
@@ -223,6 +266,20 @@ impl DiskMonitor {
                     .map(|p| (name.clone(), io_stats_from(p, c, elapsed)))
             })
             .collect();
+        // Byte-rate history for the sparklines, from the same diskstats
+        // deltas as the table columns (not sysinfo, which lags a refresh).
+        for (name, c) in cur.iter() {
+            if let Some(p) = self.prev_stats.get(name) {
+                let rb = d_sectors(p.sectors_read, c.sectors_read) * 512;
+                let wb = d_sectors(p.sectors_written, c.sectors_written) * 512;
+                let (rq, wq) = self
+                    .history
+                    .entry(name.clone())
+                    .or_insert_with(|| (VecDeque::new(), VecDeque::new()));
+                push_capped(rq, rb as f32 / elapsed.max(0.001), HISTORY_SAMPLES);
+                push_capped(wq, wb as f32 / elapsed.max(0.001), HISTORY_SAMPLES);
+            }
+        }
         self.prev_stats = cur;
         self.last_refresh = Some(now);
         let (p10, p60, p300) = psi::some("io");
@@ -232,6 +289,11 @@ impl DiskMonitor {
     /// PSI I/O pressure "some" averages (10s/60s/300s).
     pub fn io_pressure(&self) -> [f64; 3] {
         self.io_pressure
+    }
+
+    /// Per-device read/write rate history (newest last) for sparklines.
+    pub fn history(&self) -> &HashMap<String, (VecDeque<f32>, VecDeque<f32>)> {
+        &self.history
     }
 
     pub fn snapshot(&self) -> Vec<DiskInfo> {
@@ -255,8 +317,8 @@ impl DiskMonitor {
                 let available = d.available_space();
                 let used = total.saturating_sub(available);
                 let name = d.name().to_string_lossy().into_owned();
-                let key = name.rsplit('/').next().unwrap_or(&name);
-                let io = self.io_stats.get(key).cloned().unwrap_or_default();
+                let key = name.rsplit('/').next().unwrap_or(&name).to_string();
+                let io = self.io_stats.get(&key).cloned().unwrap_or_default();
                 DiskInfo {
                     name,
                     mount: d.mount_point().to_string_lossy().into_owned(),
@@ -273,6 +335,10 @@ impl DiskMonitor {
                     write_bps: rate(u.written_bytes, elapsed),
                     total_read_bytes: u.total_read_bytes,
                     total_written_bytes: u.total_written_bytes,
+                    temp_c: nvme_temp_c(
+                        &Path::new("/sys/block")
+                            .join(self.dm_aliases.get(key.as_str()).unwrap_or(&key)),
+                    ),
                     io,
                 }
             })
@@ -280,12 +346,69 @@ impl DiskMonitor {
     }
 }
 
+/// Sector delta between two diskstats samples.
+fn d_sectors(a: u64, b: u64) -> u64 {
+    b.saturating_sub(a)
+}
+
+/// Push into a capped ring buffer.
+fn push_capped(q: &mut VecDeque<f32>, v: f32, cap: usize) {
+    q.push_back(v);
+    if q.len() > cap {
+        q.pop_front();
+    }
+}
+
+/// First hwmon temp1_input (millidegrees) directly under `dir`.
+fn scan_hwmon(dir: &Path) -> Option<f32> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for e in entries.flatten() {
+        if !e.file_name().to_string_lossy().starts_with("hwmon") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(e.path().join("temp1_input")).ok()?;
+        let milli: i64 = raw.trim().parse().ok()?;
+        return Some(milli as f32 / 1000.0);
+    }
+    None
+}
+
+/// Device temperature in °C from the first hwmon temp1_input of the disk
+/// node. Candidates in order: the node itself, its `device` symlink (which
+/// on sysfs points at the controller that owns hwmon), the parent disk node
+/// for partitions, and each dm slave plus its parent.
+fn nvme_temp_c(block_dir: &Path) -> Option<f32> {
+    let name = block_dir.file_name()?.to_str()?;
+    let mut nodes: Vec<std::path::PathBuf> =
+        vec![block_dir.to_path_buf(), block_dir.join("device")];
+    if !block_dir.join("device").is_dir() {
+        if let Some(p) = name.rfind('p') {
+            nodes.push(block_dir.parent()?.join(&name[..p]));
+        } else {
+            for slave in std::fs::read_dir(block_dir.join("slaves")).ok()?.flatten() {
+                // slaves/ entries are symlinks to the real disk node.
+                let real = std::fs::canonicalize(slave.path()).ok()?;
+                nodes.push(real.clone());
+                if let Some(parent) = real.parent() {
+                    nodes.push(parent.to_path_buf());
+                }
+            }
+        }
+    }
+    for node in nodes {
+        if let Some(t) = scan_hwmon(&node.join("device")).or_else(|| scan_hwmon(&node)) {
+            return Some(t);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn line() -> &'static str {
-        "259 0 nvme0n1 1000 0 100000 500 200 0 40000 400 0 600 800\n"
+        "259 0 nvme0n1 1000 0 100000 500 200 0 40000 400 0 600 800 50 2000 30\n"
     }
 
     #[test]
@@ -305,6 +428,9 @@ mod tests {
         assert_eq!(c.writes, 200);
         assert_eq!(c.ms_doing_io, 600);
         assert_eq!(c.ms_weighted_io, 800);
+        assert_eq!(c.discards, 50);
+        assert_eq!(c.discard_sectors, 2000);
+        assert_eq!(c.flushes, 30);
     }
 
     #[test]
@@ -314,10 +440,75 @@ mod tests {
     }
 
     #[test]
+    fn io_stats_computes_discard_and_flush() {
+        let prev = diskstats_from(line());
+        // +100 discards, +8000 sectors, +200 flushes in 2s.
+        let cur_raw = "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 150 10000 230\n";
+        let cur = diskstats_from(cur_raw);
+        let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 2.0);
+        assert_eq!(s.d_s, 50);
+        assert_eq!(s.flush_s, 100);
+        // 8000 sectors * 512 / 1024 / 100 discards = 40 KiB
+        assert_eq!(s.discard_req_kib, 40.0);
+    }
+
+    #[test]
+    fn push_capped_keeps_newest() {
+        let mut q = VecDeque::new();
+        for i in 0..5 {
+            push_capped(&mut q, i as f32, 3);
+        }
+        assert_eq!(q.len(), 3);
+        assert_eq!(q.iter().copied().collect::<Vec<_>>(), vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn nvme_temp_reads_milli_degrees() {
+        let base = std::env::temp_dir().join(format!("perfo-hwmon-test-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("device/hwmon0")).unwrap();
+        std::fs::write(base.join("device/hwmon0/temp1_input"), "47800\n").unwrap();
+        assert_eq!(nvme_temp_c(&base), Some(47.8));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn nvme_temp_partition_uses_parent_device() {
+        let base = std::env::temp_dir().join(format!("perfo-hwmon-part-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("nvme0n1/device/hwmon0")).unwrap();
+        std::fs::write(base.join("nvme0n1/device/hwmon0/temp1_input"), "40000\n").unwrap();
+        // nvme0n1p1 has no /device; must walk up to nvme0n1.
+        assert_eq!(nvme_temp_c(&base.join("nvme0n1p1")), Some(40.0));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+#[test]
+    fn nvme_temp_dm_resolves_through_slaves() {
+        let base = std::env::temp_dir().join(format!("perfo-hwmon-dm-{}", std::process::id()));
+        // sysfs layout: partition dir lives INSIDE the disk node dir.
+        std::fs::create_dir_all(base.join("nvme0n1/nvme0n1p2")).unwrap();
+        std::fs::create_dir_all(base.join("nvme0n1/device/hwmon0")).unwrap();
+        std::fs::write(base.join("nvme0n1/device/hwmon0/temp1_input"), "41000\n").unwrap();
+        std::fs::create_dir_all(base.join("dm-0/slaves")).unwrap();
+        std::os::unix::fs::symlink(
+            base.join("nvme0n1/nvme0n1p2"),
+            base.join("dm-0/slaves/nvme0n1p2"),
+        )
+        .unwrap();
+        // dm-0 has no /device and no 'p'; must resolve via slaves/.
+        assert_eq!(nvme_temp_c(&base.join("dm-0")), Some(41.0));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn nvme_temp_missing_dir_is_none() {
+        assert_eq!(nvme_temp_c(Path::new("/nonexistent/block")), None);
+    }
+
+    #[test]
     fn io_stats_computes_await_and_busy() {
         let prev = diskstats_from(line());
         // 2s later: 2000 reads done, 400ms total reading, 2000ms doing io.
-        let cur_raw = "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800\n";
+        let cur_raw = "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 50 2000 30\n";
         let cur = diskstats_from(cur_raw);
         let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 2.0);
         assert_eq!(s.r_s, 1000);
@@ -342,7 +533,7 @@ mod tests {
     #[test]
     fn io_stats_computes_merge_and_req_size() {
         let prev = diskstats_from(line());
-        let cur_raw = "259 0 nvme0n1 2000 1000 200000 600 300 150 50000 500 0 700 900\n";
+        let cur_raw = "259 0 nvme0n1 2000 1000 200000 600 300 150 50000 500 0 700 900 50 2000 30\n";
         let cur = diskstats_from(cur_raw);
         let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 1.0);
         // 1000 extra merged of 2000 total (1000 reads + 1000 merged) -> 50%

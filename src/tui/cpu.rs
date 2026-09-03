@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -150,15 +152,46 @@ fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk
         .collect()
 }
 
-/// Rate bar scaled against the busiest disk of this sample.
-fn rate_bar(bps: u64, max_bps: u64, width: usize) -> String {
-    let ratio = if max_bps > 0 {
-        bps as f32 / max_bps as f32
+/// Mini trend graph: the ring's samples bucketed down to `width` columns,
+/// scaled to the bucket max. Empty history renders as spaces.
+fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
+    const CHARS: [char; 9] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█', '█'];
+    if samples.is_empty() {
+        return " ".repeat(width);
+    }
+    let bucket = samples.len().div_ceil(width);
+    let mut vals: Vec<f32> = Vec::new();
+    let mut sum = 0.0;
+    let mut cnt = 0usize;
+    for (i, v) in samples.iter().enumerate() {
+        sum += v;
+        cnt += 1;
+        if (i + 1) % bucket == 0 || i == samples.len() - 1 {
+            vals.push(sum / cnt as f32);
+            sum = 0.0;
+            cnt = 0;
+        }
+    }
+    let max = vals.iter().copied().fold(0.0f32, f32::max).max(0.001);
+    let line: String = vals
+        .iter()
+        .map(|v| CHARS[((v / max * 8.0) as usize).min(8)])
+        .collect();
+    if line.len() < width {
+        format!("{}{}", " ".repeat(width - line.len()), line)
     } else {
-        0.0
-    };
-    let filled = ((ratio * width as f32).round() as usize).min(width);
-    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+        line
+    }
+}
+
+/// NVMe/SATA temperature color: green <55°C, yellow 55-70, red >70
+/// (drives throttle around 80°C).
+fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
+    match temp_c {
+        Some(c) if c >= 70.0 => t.red,
+        Some(c) if c >= 55.0 => t.yellow,
+        _ => t.green,
+    }
 }
 
 pub fn draw(frame: &mut Frame, ui: &Ui) {
@@ -471,13 +504,10 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
     let disks = unique_disks(&ui.snap.disks);
-    let max_rate = disks
-        .iter()
-        .map(|d| d.read_bps.max(d.write_bps))
-        .max()
-        .unwrap_or(0);
     let total_r: u64 = disks.iter().map(|d| d.read_bps).sum();
     let total_w: u64 = disks.iter().map(|d| d.write_bps).sum();
+    let total_d: u64 = disks.iter().map(|d| d.io.d_s).sum();
+    let total_fl: u64 = disks.iter().map(|d| d.io.flush_s).sum();
 
     let pipe = |s: &str| Span::styled(s.to_string(), Style::default().fg(ui.theme.muted));
     let mut lines = vec![Line::from(vec![
@@ -493,45 +523,61 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
         ),
         pipe("│"),
         Span::styled(
-            format!("{:>17}", format!("read {}/s", short_bytes(total_r))),
+            format!("{:>15}", format!("read {}/s", short_bytes(total_r))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            format!("{:>17}", format!("write {}/s", short_bytes(total_w))),
+            format!("{:>15}", format!("write {}/s", short_bytes(total_w))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            " taxas desde o ultimo refresh",
+            format!("{:>12}", format!("trim {}/s", short_bytes(total_d))),
             Style::default().fg(ui.theme.muted),
         ),
+        pipe("│"),
+        Span::styled(
+            format!("{:>8}", format!("flush {}/s", total_fl)),
+            Style::default().fg(ui.theme.muted),
+        ),
+        pipe("│"),
+        Span::styled(" ultimo refresh", Style::default().fg(ui.theme.muted)),
     ])];
 
     lines.push(Line::from(vec![
         pipe(&format!(" {:<9}", "DISK")),
         pipe("│"),
-        pipe(&format!("{:>7}", "r/s")),
+        pipe(&format!("{:>6}", "r/s")),
         pipe("│"),
-        pipe(&format!("{:>8}", "r_awt ms")),
+        pipe(&format!("{:>7}", "r_awt ms")),
         pipe("│"),
-        pipe(&format!("{:>7}", "w/s")),
+        pipe(&format!("{:>6}", "w/s")),
         pipe("│"),
-        pipe(&format!("{:>8}", "w_awt ms")),
+        pipe(&format!("{:>7}", "w_awt ms")),
         pipe("│"),
-        pipe(&format!("{:>6}", "fila")),
+        pipe(&format!("{:>5}", "fila")),
         pipe("│"),
-        pipe(&format!("{:>6}", "busy")),
+        pipe(&format!("{:>5}", "busy")),
         pipe("│"),
-        pipe(&format!("{:>17}", "READ")),
+        pipe(&format!("{:>4}", "temp")),
         pipe("│"),
-        pipe(&format!("{:>17}", "WRITE")),
+        pipe(&format!("{:>14}", "READ")),
+        pipe("│"),
+        pipe(&format!("{:>14}", "WRITE")),
         pipe("│"),
         pipe(&format!(" {:<8}", "MOUNT")),
     ]));
     for d in disks {
         let mount = truncate(&d.mount, 8);
         let name = truncate(d.name.rsplit('/').next().unwrap_or(&d.name), 9);
+        let key = d.name.rsplit('/').next().unwrap_or(&d.name);
+        let (rhist, whist) = ui
+            .snap
+            .io_history
+            .get(key)
+            .map(|(r, w)| (r.clone(), w.clone()))
+            .unwrap_or_default();
         lines.push(Line::from(vec![
             Span::styled(format!(" {name:<9}"), Style::default().fg(ui.theme.muted)),
             pipe("│"),
@@ -566,9 +612,16 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             ),
             pipe("│"),
             Span::styled(
+                d.temp_c
+                    .map(|t| format!(" {:>3.0}°", t))
+                    .unwrap_or_else(|| "   -".into()),
+                Style::default().fg(temp_color(d.temp_c, &ui.theme)),
+            ),
+            pipe("│"),
+            Span::styled(
                 format!(
-                    " {:<6} {:>7}/s",
-                    rate_bar(d.read_bps, max_rate, 6),
+                    " {:<5} {:>6}/s",
+                    sparkline(&rhist, 5),
                     short_bytes(d.read_bps)
                 ),
                 Style::default().fg(ui.theme.accent),
@@ -576,8 +629,8 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(
                 format!(
-                    " {:<6} {:>7}/s",
-                    rate_bar(d.write_bps, max_rate, 6),
+                    " {:<5} {:>6}/s",
+                    sparkline(&whist, 5),
                     short_bytes(d.write_bps)
                 ),
                 Style::default().fg(ui.theme.yellow),
@@ -587,18 +640,19 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
         ]));
     }
 
-    // Top processes by actual storage I/O (iotop-style, own processes only).
+    // Top processes by storage I/O accumulated in the current window
+    // (IO_WINDOW_SECS): "who hammered the disk lately", not just this tick.
     let mut by_io: Vec<&ProcessInfo> = ui
         .snap
         .processes
         .iter()
-        .filter(|p| p.read_bps > 0 || p.write_bps > 0)
+        .filter(|p| p.win_read_bytes > 0 || p.win_write_bytes > 0)
         .collect();
-    by_io.sort_by_key(|a| std::cmp::Reverse(a.read_bps + a.write_bps));
+    by_io.sort_by_key(|a| std::cmp::Reverse(a.win_read_bytes + a.win_write_bytes));
     if !by_io.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "PROCESSOS COM I/O ATIVO (quem esta martelando o disco)",
+            "MAIOR I/O NA JANELA (300s) — quem martelou o disco",
             Style::default().fg(ui.theme.accent),
         )));
         for p in by_io.iter().take(6) {
@@ -609,9 +663,9 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
                 ),
                 Span::styled(
                     format!(
-                        "read {:>7}/s  write {:>7}/s  ",
-                        short_bytes(p.read_bps),
-                        short_bytes(p.write_bps)
+                        "read {:>6}  write {:>6}  ",
+                        short_bytes(p.win_read_bytes),
+                        short_bytes(p.win_write_bytes)
                     ),
                     Style::default().fg(ui.theme.fg),
                 ),
@@ -857,6 +911,7 @@ mod tests {
             write_bps: 0,
             total_read_bytes: 0,
             total_written_bytes: 0,
+            temp_c: None,
             io: Default::default(),
         }
     }
@@ -877,9 +932,24 @@ mod tests {
     }
 
     #[test]
-    fn rate_bar_scales_and_clamps() {
-        assert_eq!(rate_bar(50_000_000, 100_000_000, 10), "█████░░░░░");
-        assert_eq!(rate_bar(0, 100_000_000, 10), "░░░░░░░░░░");
-        assert_eq!(rate_bar(1, 0, 10), "░░░░░░░░░░");
+    fn sparkline_buckets_and_scales() {
+        let mut q = VecDeque::new();
+        for v in [0.0, 0.0, 100.0, 0.0, 0.0, 0.0] {
+            q.push_back(v);
+        }
+        // 6 samples into 2 buckets: [0,0,100] and [0,0,0].
+        let s = sparkline(&q, 2);
+        assert_eq!(s.chars().count(), 2);
+        assert_eq!(s, "█▁");
+        assert_eq!(sparkline(&VecDeque::new(), 3), "   ");
+    }
+
+    #[test]
+    fn temp_color_thresholds() {
+        let t = Theme::DEFAULT;
+        assert_eq!(temp_color(Some(40.0), &t), t.green);
+        assert_eq!(temp_color(Some(60.0), &t), t.yellow);
+        assert_eq!(temp_color(Some(80.0), &t), t.red);
+        assert_eq!(temp_color(None, &t), t.green);
     }
 }
