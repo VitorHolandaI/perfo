@@ -51,9 +51,9 @@ struct State {
     kill_prompt: bool,
     status_msg: Option<String>,
     pane: Pane,
-    /// Pane before the last switch; pressing the focused pane's number
-    /// again returns to it (tmux-style toggle).
-    prev_pane: Option<Pane>,
+    /// Fullscreen mode: only `pane` renders (numbers expand each pane).
+    /// False = dashboard aggregates CPU + mem + disks + the active pane.
+    fullscreen: bool,
     paused: bool,
     use_system_theme: bool,
     lang: Lang,
@@ -80,7 +80,7 @@ impl Default for State {
             kill_prompt: false,
             status_msg: None,
             pane: Pane::Procs,
-            prev_pane: None,
+            fullscreen: false,
             paused: false,
             use_system_theme: true,
             lang: Lang::Pt,
@@ -171,6 +171,7 @@ fn run_loop(
                 full_cmd: state.full_cmd,
                 tree: state.tree,
                 pane: state.pane,
+                fullscreen: state.fullscreen,
                 theme,
                 help: state.help,
                 help_page: state.help_page,
@@ -430,7 +431,6 @@ fn handle_normal_key(
             }
         }
         KeyCode::Tab | KeyCode::BackTab => {
-            state.prev_pane = Some(state.pane);
             state.pane = match state.pane {
                 Pane::Cpu => Pane::Io,
                 Pane::Io => Pane::Net,
@@ -522,18 +522,14 @@ fn handle_normal_key(
     }
 }
 
-/// Jump to `target`; pressing the focused pane's number again returns to
-/// the previous one (tmux-style window toggle).
+/// Expand `target` fullscreen, or drop back to the dashboard when the same
+/// pane's number is pressed again.
 fn focus_pane(state: &mut State, target: Pane) {
-    if state.pane == target {
-        if let Some(prev) = state.prev_pane {
-            let cur = state.pane;
-            state.pane = prev;
-            state.prev_pane = Some(cur);
-        }
+    if state.fullscreen && state.pane == target {
+        state.fullscreen = false;
     } else {
-        state.prev_pane = Some(state.pane);
         state.pane = target;
+        state.fullscreen = true;
     }
 }
 
@@ -661,8 +657,9 @@ fn status_line(state: &State) -> String {
         Pane::Net => "[3:NET pane] ",
         Pane::Procs => "[4:PROCS pane] ",
     };
+    let full = if state.fullscreen { "[FULL] " } else { "" };
     format!(
-        "{pane}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L lang | ? help",
+        "{pane}{full}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L lang | ? help",
         if state.paused { "\u{23F8} PAUSED " } else { "" },
         if state.tree { " \u{2713}" } else { "" },
         if state.show_threads { " \u{2713}" } else { "" },
@@ -798,18 +795,23 @@ mod tests {
     fn pane_numbers_focus_and_toggle_back() {
         let mut s = State::default();
         assert_eq!(s.pane, Pane::Procs);
-        // 1 foca CPU; repetir 1 volta pro Procs (anterior).
+        assert!(!s.fullscreen);
+        // 1 expande CPU em tela cheia; repetir 1 volta pro dashboard.
         handle_key(&mut s, &[], KeyCode::Char('1'), KeyModifiers::empty(), None);
         assert_eq!(s.pane, Pane::Cpu);
+        assert!(s.fullscreen);
         handle_key(&mut s, &[], KeyCode::Char('1'), KeyModifiers::empty(), None);
-        assert_eq!(s.pane, Pane::Procs);
-        // 2 foca IO; Tab muda pra NET; repetir 3 volta pro IO.
+        assert!(!s.fullscreen);
+        assert_eq!(s.pane, Pane::Cpu);
+        // 2 expande IO; 3 troca o painel expandido; 3 de novo volta.
         handle_key(&mut s, &[], KeyCode::Char('2'), KeyModifiers::empty(), None);
         assert_eq!(s.pane, Pane::Io);
+        assert!(s.fullscreen);
         handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
         assert_eq!(s.pane, Pane::Net);
+        assert!(s.fullscreen);
         handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
-        assert_eq!(s.pane, Pane::Io);
+        assert!(!s.fullscreen);
     }
 
     #[test]

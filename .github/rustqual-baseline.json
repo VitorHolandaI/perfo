@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "quality_score": 0.07366666666666688,
+  "quality_score": 0.04799999999999993,
   "iosp_score": 0.9696969696969697,
   "violations": 4,
   "total": 210,
   "complexity_warnings": 7,
-  "magic_number_warnings": 94,
+  "magic_number_warnings": 99,
   "nesting_depth_warnings": 3,
   "function_length_warnings": 12,
   "unsafe_warnings": 10,
@@ -14,7 +14,7 @@
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
-  "boilerplate_warnings": 2,
+  "boilerplate_warnings": 1,
   "srp_struct_warnings": 0,
   "srp_module_warnings": 7,
   "wildcard_import_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 156,
+  "total_findings": 160,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
@@ -43,12 +43,12 @@
     {
       "name": "prepare",
       "file": "src/tui/mod.rs",
-      "line": 195
+      "line": 196
     },
     {
       "name": "build_tree",
       "file": "src/tui/mod.rs",
-      "line": 247
+      "line": 248
     }
   ]
 }

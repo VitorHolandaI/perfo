@@ -53,6 +53,7 @@ pub struct Ui<'a> {
     pub full_cmd: bool,
     pub tree: bool,
     pub pane: Pane,
+    pub fullscreen: bool,
     pub theme: Theme,
     pub help: bool,
     pub help_page: usize,
@@ -198,17 +199,42 @@ fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
 }
 
 pub fn draw(frame: &mut Frame, ui: &Ui) {
-    // The focused window owns the whole terminal; only the status line and
-    // help overlay share it.
-    let [body, status_area] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
-    match ui.pane {
-        Pane::Cpu => draw_cpu_pane(frame, body, ui),
-        Pane::Io => draw_io(frame, body, ui),
-        Pane::Net => draw_net(frame, body, ui),
-        Pane::Procs => draw_processes(frame, body, ui),
+    if ui.fullscreen {
+        // Focused window owns the whole terminal (status line + help still
+        // overlay on top).
+        let [body, status_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+        match ui.pane {
+            Pane::Cpu => draw_cpu_pane(frame, body, ui),
+            Pane::Io => draw_io(frame, body, ui),
+            Pane::Net => draw_net(frame, body, ui),
+            Pane::Procs => draw_processes(frame, body, ui),
+        }
+        draw_status(frame, status_area, ui);
+    } else {
+        // Dashboard: CPU, memory + disks, and the active pane stacked.
+        let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
+        let [cpu_area, mid_area, proc_area, status_area] = Layout::vertical([
+            Constraint::Length(6 + core_lines as u16),
+            Constraint::Length(7),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
+        draw_cpu(frame, cpu_area, ui);
+        let [mem_area, disk_area] =
+            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .areas(mid_area);
+        draw_mem(frame, mem_area, ui);
+        draw_disks(frame, disk_area, ui);
+        match ui.pane {
+            Pane::Cpu => {}
+            Pane::Io => draw_io(frame, proc_area, ui),
+            Pane::Net => draw_net(frame, proc_area, ui),
+            Pane::Procs => draw_processes(frame, proc_area, ui),
+        }
+        draw_status(frame, status_area, ui);
     }
-    draw_status(frame, status_area, ui);
     if ui.help {
         draw_help(frame, frame.area(), ui);
     }
@@ -651,6 +677,42 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(format!(" {mount:<8}"), Style::default().fg(ui.theme.fg)),
         ]));
+    }
+
+    // Instant per-process I/O (this tick's read/write rates).
+    let mut by_rate: Vec<&ProcessInfo> = ui
+        .snap
+        .processes
+        .iter()
+        .filter(|p| p.read_bps > 0 || p.write_bps > 0)
+        .collect();
+    by_rate.sort_by_key(|a| std::cmp::Reverse(a.read_bps + a.write_bps));
+    if !by_rate.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "I/O ATIVO AGORA (por processo)",
+            Style::default().fg(ui.theme.accent),
+        )));
+        for p in by_rate.iter().take(6) {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:<11}", truncate(&p.user, 11)),
+                    Style::default().fg(ui.theme.muted),
+                ),
+                Span::styled(
+                    format!(
+                        "read {:>7}/s  write {:>7}/s  ",
+                        short_bytes(p.read_bps),
+                        short_bytes(p.write_bps)
+                    ),
+                    Style::default().fg(ui.theme.fg),
+                ),
+                Span::styled(
+                    truncate(&p.cmd, inner.width.saturating_sub(40) as usize),
+                    Style::default().fg(ui.theme.fg),
+                ),
+            ]));
+        }
     }
 
     // Top processes by storage I/O accumulated in the current window
