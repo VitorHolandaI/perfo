@@ -479,87 +479,92 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     let total_r: u64 = disks.iter().map(|d| d.read_bps).sum();
     let total_w: u64 = disks.iter().map(|d| d.write_bps).sum();
 
+    let pipe = |s: &str| Span::styled(s.to_string(), Style::default().fg(ui.theme.muted));
     let mut lines = vec![Line::from(vec![
+        pipe("│"),
         Span::styled(
             format!(
-                "io pressure {:>4.1} {:>4.1} {:>4.1}%   ",
+                " io pressure {:>4.1} {:>4.1} {:>4.1}%",
                 ui.snap.io_pressure_some[0],
                 ui.snap.io_pressure_some[1],
                 ui.snap.io_pressure_some[2]
             ),
             Style::default().fg(io_pressure_color(ui.snap.io_pressure_some[0], &ui.theme)),
         ),
+        pipe("│"),
         Span::styled(
-            format!(
-                "read {:>7}/s   write {:>7}/s",
-                short_bytes(total_r),
-                short_bytes(total_w)
-            ),
+            format!(" read {:>7}/s", short_bytes(total_r)),
             Style::default().fg(ui.theme.accent),
         ),
+        pipe("│"),
         Span::styled(
-            "   (taxas desde o ultimo refresh)",
+            format!(" write {:>7}/s", short_bytes(total_w)),
+            Style::default().fg(ui.theme.accent),
+        ),
+        pipe("│"),
+        Span::styled(
+            " taxas desde o ultimo refresh",
             Style::default().fg(ui.theme.muted),
         ),
     ])];
-    let head = |s: &str| Span::styled(s.to_string(), Style::default().fg(ui.theme.muted));
+
     lines.push(Line::from(vec![
-        head(&format!(" {:<9}", "DISK")),
-        head("│"),
-        head(&format!("{:>7}", "r/s")),
-        head("│"),
-        head(&format!("{:>8}", "r_awt ms")),
-        head("│"),
-        head(&format!("{:>7}", "w/s")),
-        head("│"),
-        head(&format!("{:>8}", "w_awt ms")),
-        head("│"),
-        head(&format!("{:>6}", "fila")),
-        head("│"),
-        head(&format!("{:>6}", "busy")),
-        head("│"),
-        head(&format!("{:>17}", "READ")),
-        head("│"),
-        head(&format!("{:>17}", "WRITE")),
-        head("│"),
-        head(&format!(" {:<8}", "MOUNT")),
+        pipe(&format!(" {:<9}", "DISK")),
+        pipe("│"),
+        pipe(&format!("{:>7}", "r/s")),
+        pipe("│"),
+        pipe(&format!("{:>8}", "r_awt ms")),
+        pipe("│"),
+        pipe(&format!("{:>7}", "w/s")),
+        pipe("│"),
+        pipe(&format!("{:>8}", "w_awt ms")),
+        pipe("│"),
+        pipe(&format!("{:>6}", "fila")),
+        pipe("│"),
+        pipe(&format!("{:>6}", "busy")),
+        pipe("│"),
+        pipe(&format!("{:>17}", "READ")),
+        pipe("│"),
+        pipe(&format!("{:>17}", "WRITE")),
+        pipe("│"),
+        pipe(&format!(" {:<8}", "MOUNT")),
     ]));
     for d in disks {
         let mount = truncate(&d.mount, 8);
         let name = truncate(d.name.rsplit('/').next().unwrap_or(&d.name), 9);
         lines.push(Line::from(vec![
             Span::styled(format!(" {name:<9}"), Style::default().fg(ui.theme.muted)),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>6}", d.io.r_s),
                 Style::default().fg(ui.theme.fg),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>7.1}", d.io.r_await_ms),
                 Style::default().fg(await_color(d.io.r_await_ms, &ui.theme)),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>6}", d.io.w_s),
                 Style::default().fg(ui.theme.fg),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>7.1}", d.io.w_await_ms),
                 Style::default().fg(await_color(d.io.w_await_ms, &ui.theme)),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>5.1}", d.io.queue_avg),
                 Style::default().fg(queue_color(d.io.queue_avg, &ui.theme)),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(" {:>4.0}%", d.io.busy_pct),
                 Style::default().fg(busy_color(d.io.busy_pct, &ui.theme)),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(
                     " {:<6} {:>7}/s",
@@ -568,7 +573,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
                 ),
                 Style::default().fg(ui.theme.accent),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(
                 format!(
                     " {:<6} {:>7}/s",
@@ -577,7 +582,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
                 ),
                 Style::default().fg(ui.theme.yellow),
             ),
-            Span::styled("│", Style::default().fg(ui.theme.muted)),
+            pipe("│"),
             Span::styled(format!(" {mount:<8}"), Style::default().fg(ui.theme.fg)),
         ]));
     }
