@@ -493,12 +493,12 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
         ),
         pipe("│"),
         Span::styled(
-            format!(" read {:>7}/s", short_bytes(total_r)),
+            format!("{:>17}", format!("read {}/s", short_bytes(total_r))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
         Span::styled(
-            format!(" write {:>7}/s", short_bytes(total_w)),
+            format!("{:>17}", format!("write {}/s", short_bytes(total_w))),
             Style::default().fg(ui.theme.accent),
         ),
         pipe("│"),
