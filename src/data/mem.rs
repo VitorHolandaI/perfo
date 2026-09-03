@@ -58,7 +58,10 @@ pub fn snapshot() -> MemSnapshot {
         .unwrap_or(0)
         .saturating_add(m.get("SReclaimable").copied().unwrap_or(0))
         .saturating_sub(shmem);
-    let used = total.saturating_sub(free).saturating_sub(buffers).saturating_sub(cache);
+    let used = total
+        .saturating_sub(free)
+        .saturating_sub(buffers)
+        .saturating_sub(cache);
     let swap_total = m.get("SwapTotal").copied().unwrap_or(0);
     let swap_free = m.get("SwapFree").copied().unwrap_or(0);
     let (p10, p60, p300) = psi_some();

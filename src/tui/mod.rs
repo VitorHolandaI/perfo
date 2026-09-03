@@ -1,4 +1,5 @@
 pub mod cpu;
+mod help;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
@@ -28,6 +29,13 @@ pub fn run() -> std::io::Result<()> {
     result
 }
 
+/// UI language for help text.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lang {
+    Pt,
+    En,
+}
+
 struct State {
     selected_pid: Option<u32>,
     sort: SortKey,
@@ -45,6 +53,7 @@ struct State {
     pane: Pane,
     paused: bool,
     use_system_theme: bool,
+    lang: Lang,
     help: bool,
     help_page: usize,
     tracing: bool,
@@ -70,6 +79,7 @@ impl Default for State {
             pane: Pane::Procs,
             paused: false,
             use_system_theme: true,
+            lang: Lang::Pt,
             help: false,
             help_page: 0,
             tracing: false,
@@ -94,7 +104,7 @@ fn run_loop(
     let mut trace_thread: Option<std::thread::JoinHandle<()>> = None;
 
     loop {
-if last_tick.elapsed() >= TICK && !state.paused {
+        if last_tick.elapsed() >= TICK && !state.paused {
             // Process stats are the expensive part; refresh them every other
             // tick so the bars stay at 1s while the table lags 2s.
             if full_tick {
@@ -129,7 +139,13 @@ if last_tick.elapsed() >= TICK && !state.paused {
         }
 
         // Manage the tracer thread.
-        manage_trace_thread(&mut state, &mut trace_thread, &trace_tx, &trace_rx, &mut trace_lines);
+        manage_trace_thread(
+            &mut state,
+            &mut trace_thread,
+            &trace_tx,
+            &trace_rx,
+            &mut trace_lines,
+        );
 
         if let Some(s) = &snap {
             let (rows, pids, selected) = prepare(s, &mut state);
@@ -154,6 +170,7 @@ if last_tick.elapsed() >= TICK && !state.paused {
                 theme,
                 help: state.help,
                 help_page: state.help_page,
+                lang: state.lang,
                 tracing: state.tracing || trace_thread.is_some(),
                 trace_lines: if state.tracing || trace_thread.is_some() {
                     Some(&trace_lines)
@@ -171,7 +188,10 @@ if last_tick.elapsed() >= TICK && !state.paused {
     Ok(())
 }
 
-fn prepare<'a>(snap: &'a CpuSnapshot, state: &mut State) -> (Vec<Row<'a>>, Vec<u32>, Option<usize>) {
+fn prepare<'a>(
+    snap: &'a CpuSnapshot,
+    state: &mut State,
+) -> (Vec<Row<'a>>, Vec<u32>, Option<usize>) {
     if !snap.per_core.is_empty() {
         state.core_focus = state.core_focus.min(snap.per_core.len() - 1);
     }
@@ -181,7 +201,11 @@ fn prepare<'a>(snap: &'a CpuSnapshot, state: &mut State) -> (Vec<Row<'a>>, Vec<u
         .iter()
         .filter(|p| state.show_kernel || !p.is_kernel)
         .filter(|p| state.show_threads || p.owner.is_none())
-        .filter(|p| state.core_filter.map_or(true, |c| p.last_cpu == Some(c as u32)))
+        .filter(|p| {
+            state
+                .core_filter
+                .is_none_or(|c| p.last_cpu == Some(c as u32))
+        })
         .filter(|p| needle.is_empty() || p.cmd.to_lowercase().contains(&needle))
         .collect();
 
@@ -191,7 +215,10 @@ fn prepare<'a>(snap: &'a CpuSnapshot, state: &mut State) -> (Vec<Row<'a>>, Vec<u
         let mut v = filtered;
         sort_procs(&mut v, state.sort, state.invert);
         v.into_iter()
-            .map(|p| Row { depth: 0, process: p })
+            .map(|p| Row {
+                depth: 0,
+                process: p,
+            })
             .collect()
     };
     let display_pids: Vec<u32> = rows.iter().map(|r| r.process.pid).collect();
@@ -243,7 +270,10 @@ fn build_tree<'a>(procs: &[&'a ProcessInfo], sort: SortKey, desc: bool) -> Vec<R
 
     let mut out = Vec::new();
     for r in roots {
-        out.push(Row { depth: 0, process: r });
+        out.push(Row {
+            depth: 0,
+            process: r,
+        });
         walk(r.pid, 1, &children, sort, desc, &mut out);
     }
     out
@@ -327,6 +357,9 @@ fn handle_help_key(state: &mut State, code: KeyCode) {
         KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
             state.help = false;
         }
+        KeyCode::Char('L') => {
+            toggle_lang(state);
+        }
         _ => {}
     }
 }
@@ -334,7 +367,11 @@ fn handle_help_key(state: &mut State, code: KeyCode) {
 fn handle_tracing_key(state: &mut State, code: KeyCode) {
     if matches!(
         code,
-        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+        KeyCode::Char('s')
+            | KeyCode::Char('S')
+            | KeyCode::Char('q')
+            | KeyCode::Char('Q')
+            | KeyCode::Esc
     ) {
         state.tracing = false;
     }
@@ -432,6 +469,7 @@ fn handle_normal_key(
             false
         }
         KeyCode::Char('C') => toggle_theme(state, system_theme),
+        KeyCode::Char('L') => toggle_lang(state),
         KeyCode::Char('?') => {
             state.help = true;
             false
@@ -445,9 +483,12 @@ fn handle_normal_key(
             state.searching = true;
             false
         }
-        KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
-            handle_nav_key(state, display_pids, code)
-        }
+        KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::PageUp
+        | KeyCode::PageDown
+        | KeyCode::Home
+        | KeyCode::End => handle_nav_key(state, display_pids, code),
         KeyCode::Left | KeyCode::Right => {
             if state.pane == Pane::Cpu {
                 move_core(state, code);
@@ -457,6 +498,18 @@ fn handle_normal_key(
         KeyCode::Enter | KeyCode::Char(' ') => toggle_core_filter(state),
         _ => false,
     }
+}
+
+fn toggle_lang(state: &mut State) -> bool {
+    state.lang = match state.lang {
+        Lang::Pt => Lang::En,
+        Lang::En => Lang::Pt,
+    };
+    state.status_msg = Some(match state.lang {
+        Lang::Pt => "idioma: PT".into(),
+        Lang::En => "language: EN".into(),
+    });
+    false
 }
 
 fn toggle_theme(state: &mut State, system_theme: Option<Theme>) -> bool {
@@ -563,9 +616,7 @@ fn status_line(state: &State) -> String {
         return msg.clone();
     }
     if let Some(c) = state.core_filter {
-        return format!(
-            "core {c} — Enter (mesmo nucleo) ou Esc volta pra TODOS os processos"
-        );
+        return format!("core {c} — Enter (mesmo nucleo) ou Esc volta pra TODOS os processos");
     }
     let pane = match state.pane {
         Pane::Cpu => "[CPU pane] ",
@@ -573,7 +624,7 @@ fn status_line(state: &State) -> String {
         Pane::Procs => "[PROCS pane] ",
     };
     format!(
-        "{pane}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | ? help",
+        "{pane}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L lang | ? help",
         if state.paused { "\u{23F8} PAUSED " } else { "" },
         if state.tree { " \u{2713}" } else { "" },
         if state.show_threads { " \u{2713}" } else { "" },
@@ -645,8 +696,18 @@ mod tests {
         let slow = proc_with(1, None);
         let fast = proc_with(2, None);
         // Equal cpu keys keep stable input order (sort is by key, stable).
-        assert_eq!(build_tree(&[&slow, &fast], SortKey::Cpu, true)[0].process.pid, 1);
-        assert_eq!(build_tree(&[&fast, &slow], SortKey::Cpu, true)[0].process.pid, 2);
+        assert_eq!(
+            build_tree(&[&slow, &fast], SortKey::Cpu, true)[0]
+                .process
+                .pid,
+            1
+        );
+        assert_eq!(
+            build_tree(&[&fast, &slow], SortKey::Cpu, true)[0]
+                .process
+                .pid,
+            2
+        );
     }
 
     #[test]
@@ -694,6 +755,17 @@ mod tests {
     }
 
     #[test]
+    fn lang_toggles_between_pt_and_en() {
+        let mut s = State::default();
+        assert_eq!(s.lang, Lang::Pt);
+        handle_key(&mut s, &[], KeyCode::Char('L'), KeyModifiers::empty(), None);
+        assert_eq!(s.lang, Lang::En);
+        handle_key(&mut s, &[], KeyCode::Char('L'), KeyModifiers::empty(), None);
+        assert_eq!(s.lang, Lang::Pt);
+        assert!(s.status_msg.is_some());
+    }
+
+    #[test]
     fn help_navigates_pages_and_closes() {
         let mut s = State::default();
         handle_key(&mut s, &[], KeyCode::Char('?'), KeyModifiers::empty(), None);
@@ -725,17 +797,37 @@ mod tests {
 
     #[test]
     fn esc_clears_core_filter_then_quits() {
-        let mut s = State::default();
-        s.core_filter = Some(2);
-        assert!(!handle_key(&mut s, &[], KeyCode::Esc, KeyModifiers::empty(), None));
+        let mut s = State {
+            core_filter: Some(2),
+            ..State::default()
+        };
+        assert!(!handle_key(
+            &mut s,
+            &[],
+            KeyCode::Esc,
+            KeyModifiers::empty(),
+            None
+        ));
         assert_eq!(s.core_filter, None);
-        assert!(handle_key(&mut s, &[], KeyCode::Esc, KeyModifiers::empty(), None));
+        assert!(handle_key(
+            &mut s,
+            &[],
+            KeyCode::Esc,
+            KeyModifiers::empty(),
+            None
+        ));
     }
 
     #[test]
     fn q_quits_ctrl_c_quits() {
         let mut s = State::default();
-        assert!(handle_key(&mut s, &[], KeyCode::Char('q'), KeyModifiers::empty(), None));
+        assert!(handle_key(
+            &mut s,
+            &[],
+            KeyCode::Char('q'),
+            KeyModifiers::empty(),
+            None
+        ));
         assert!(handle_key(
             &mut s,
             &[],
@@ -770,8 +862,10 @@ mod tests {
 
     #[test]
     fn tracing_key_stops_on_s_or_q() {
-        let mut s = State::default();
-        s.tracing = true;
+        let mut s = State {
+            tracing: true,
+            ..State::default()
+        };
         handle_key(&mut s, &[], KeyCode::Char('x'), KeyModifiers::empty(), None);
         assert!(s.tracing, "other keys must not stop the trace");
         handle_key(&mut s, &[], KeyCode::Char('s'), KeyModifiers::empty(), None);

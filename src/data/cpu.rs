@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use sysinfo::{CpuRefreshKind, Components, MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
+use sysinfo::{
+    Components, CpuRefreshKind, MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate,
+    RefreshKind, System, UpdateKind,
+};
 
 /// /proc/<pid>/stat: field 39 (last processor) is the 36th whitespace token
 /// after the closing `)` of the comm field.
@@ -39,8 +42,12 @@ fn proc_io_from(raw: &str) -> (u64, u64) {
     let mut out = (0, 0);
     for line in raw.lines() {
         let mut it = line.split_whitespace();
-        let (Some(key), Some(val)) = (it.next(), it.next()) else { continue };
-        let Some(v) = val.parse::<u64>().ok() else { continue };
+        let (Some(key), Some(val)) = (it.next(), it.next()) else {
+            continue;
+        };
+        let Some(v) = val.parse::<u64>().ok() else {
+            continue;
+        };
         match key {
             "read_bytes:" => out.0 = v,
             "write_bytes:" => out.1 = v,
@@ -78,7 +85,11 @@ fn stat_iowait_from(raw: &str) -> (u64, u64) {
 /// may itself contain spaces and parens).
 fn last_cpu_from_stat(raw: &str) -> Option<u32> {
     let close = raw.rfind(')')?;
-    raw[close + 1..].split_whitespace().nth(LAST_CPU_STAT_FIELD)?.parse().ok()
+    raw[close + 1..]
+        .split_whitespace()
+        .nth(LAST_CPU_STAT_FIELD)?
+        .parse()
+        .ok()
 }
 
 fn last_cpu_of(pid: u32) -> Option<u32> {
@@ -342,11 +353,16 @@ impl CpuMonitor {
         Self::do_refresh(&mut self.sys);
         self.disks.refresh();
         let now = Instant::now();
-        let elapsed = self.last_full.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
+        let elapsed = self
+            .last_full
+            .map(|t| t.elapsed().as_secs_f32())
+            .unwrap_or(0.0);
         let mut m = HashMap::with_capacity(self.sys.processes().len());
-        let mut io_cur: HashMap<u32, (u64, u64)> = HashMap::with_capacity(self.sys.processes().len());
-        let mut io_rates: HashMap<u32, (u64, u64)> = HashMap::with_capacity(self.sys.processes().len());
-        for (pid, _) in self.sys.processes() {
+        let mut io_cur: HashMap<u32, (u64, u64)> =
+            HashMap::with_capacity(self.sys.processes().len());
+        let mut io_rates: HashMap<u32, (u64, u64)> =
+            HashMap::with_capacity(self.sys.processes().len());
+        for pid in self.sys.processes().keys() {
             let pid = pid.as_u32();
             if let Some(c) = last_cpu_of(pid) {
                 m.insert(pid, c);
@@ -355,7 +371,13 @@ impl CpuMonitor {
             // keeps the read cheap (~µs) once warm.
             if let Some((rb, wb)) = proc_io_of(pid) {
                 if let Some((prb, pwb)) = self.io_prev.get(&pid) {
-                    io_rates.insert(pid, (rate_bps(rb.saturating_sub(*prb), elapsed), rate_bps(wb.saturating_sub(*pwb), elapsed)));
+                    io_rates.insert(
+                        pid,
+                        (
+                            rate_bps(rb.saturating_sub(*prb), elapsed),
+                            rate_bps(wb.saturating_sub(*pwb), elapsed),
+                        ),
+                    );
                 }
                 io_cur.insert(pid, (rb, wb));
             }
@@ -377,8 +399,7 @@ impl CpuMonitor {
         self.components.refresh(false);
     }
 
-
-pub fn snapshot(&mut self) -> CpuSnapshot {
+    pub fn snapshot(&mut self) -> CpuSnapshot {
         // On Linux every thread appears as its own /proc entry; map each
         // thread tid to its owning process via Process::tasks().
         let mut task_of: HashMap<u32, u32> = HashMap::new();

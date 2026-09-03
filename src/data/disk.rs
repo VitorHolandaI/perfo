@@ -118,7 +118,11 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
 
 /// Deltas between two diskstats samples -> iostat-style metrics.
 fn io_stats_from(prev: &RawCounters, cur: &RawCounters, elapsed_secs: f32) -> DiskIoStats {
-    let e = if elapsed_secs <= 0.0 { 1.0 } else { elapsed_secs };
+    let e = if elapsed_secs <= 0.0 {
+        1.0
+    } else {
+        elapsed_secs
+    };
     let d = |a: u64, b: u64| b.saturating_sub(a);
     let reads = d(prev.reads, cur.reads);
     let writes = d(prev.writes, cur.writes);
@@ -231,7 +235,9 @@ impl DiskMonitor {
     }
 
     pub fn snapshot(&self) -> Vec<DiskInfo> {
-        const REAL_FS: [&str; 9] = ["btrfs", "vfat", "ext4", "xfs", "f2fs", "ntfs", "zfs", "exfat", "ext2"];
+        const REAL_FS: [&str; 9] = [
+            "btrfs", "vfat", "ext4", "xfs", "f2fs", "ntfs", "zfs", "exfat", "ext2",
+        ];
         let elapsed = self
             .last_refresh
             .map(|t| t.elapsed().as_secs_f32())

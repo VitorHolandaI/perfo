@@ -138,12 +138,12 @@ const AT_FDCWD: u64 = 0xffffffffffffff9c;
 /// For known syscalls, which argument is a path/string in the tracee.
 fn string_arg_index(name: &str) -> Option<usize> {
     match name {
-        "open" | "creat" | "unlink" | "chdir" | "chmod" | "chown" | "lchown" | "stat"
-        | "lstat" | "access" | "readlink" | "mkdir" | "rmdir" | "rename" | "link"
-        | "symlink" | "truncate" | "mknod" | "mount" | "umount" | "umount2" | "swapon"
-        | "swapoff" | "acct" | "utime" | "utimes" | "statfs" | "fstatfs" | "getxattr"
-        | "setxattr" | "listxattr" | "removexattr" | "lgetxattr" | "lsetxattr"
-        | "inotify_add_watch" | "quotactl" | "execve" => Some(0),
+        "open" | "creat" | "unlink" | "chdir" | "chmod" | "chown" | "lchown" | "stat" | "lstat"
+        | "access" | "readlink" | "mkdir" | "rmdir" | "rename" | "link" | "symlink"
+        | "truncate" | "mknod" | "mount" | "umount" | "umount2" | "swapon" | "swapoff" | "acct"
+        | "utime" | "utimes" | "statfs" | "fstatfs" | "getxattr" | "setxattr" | "listxattr"
+        | "removexattr" | "lgetxattr" | "lsetxattr" | "inotify_add_watch" | "quotactl"
+        | "execve" => Some(0),
         "openat" | "newfstatat" | "unlinkat" | "readlinkat" | "mkdirat" | "renameat"
         | "renameat2" | "linkat" | "symlinkat" | "fchmodat" | "faccessat" | "execveat"
         | "statx" | "mknodat" | "fchownat" | "utimensat" | "name_to_handle_at"
@@ -174,9 +174,7 @@ fn fmt_ret(ret: i64) -> String {
 }
 
 fn fmt_args(pid: i32, regs: &user_regs_struct, name: &str) -> String {
-    let raw = [
-        regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9,
-    ];
+    let raw = [regs.rdi, regs.rsi, regs.rdx, regs.r10, regs.r8, regs.r9];
     let mut parts: Vec<String> = Vec::new();
     for (i, v) in raw.iter().enumerate() {
         if string_arg_index(name) == Some(i) {
@@ -211,7 +209,12 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
         unsafe {
             // SAFETY: pid is a traced process stopped at a syscall boundary;
             // PTRACE_SYSCALL resumes it into the next syscall-stop.
-            libc::ptrace(libc::PTRACE_SYSCALL, pid, 0, std::ptr::null_mut::<libc::c_void>());
+            libc::ptrace(
+                libc::PTRACE_SYSCALL,
+                pid,
+                0,
+                std::ptr::null_mut::<libc::c_void>(),
+            );
         }
         if wait_tracee(pid, &mut status) {
             break;
@@ -251,7 +254,7 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
             } else {
                 let nr = regs.orig_rax as usize;
                 let name = syscalls::name(nr).unwrap_or("syscall?");
-                let shown = filter.map_or(true, |f| name.contains(f));
+                let shown = filter.is_none_or(|f| name.contains(f));
                 if shown {
                     if pending.take().is_some() {
                         emit(" = <interrupted>".into());
@@ -275,7 +278,12 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
     unsafe {
         // SAFETY: pid is stopped under our ptrace control; PTRACE_DETACH
         // releases it so the tracee continues normally.
-        libc::ptrace(libc::PTRACE_DETACH, pid, 0, std::ptr::null_mut::<libc::c_void>());
+        libc::ptrace(
+            libc::PTRACE_DETACH,
+            pid,
+            0,
+            std::ptr::null_mut::<libc::c_void>(),
+        );
     }
     Ok(())
 }
@@ -294,7 +302,12 @@ fn attach_preamble(pid: i32) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         // Get an initial stop so we can start issuing PTRACE_SYSCALL.
-        libc::ptrace(libc::PTRACE_INTERRUPT, pid, 0, std::ptr::null_mut::<libc::c_void>());
+        libc::ptrace(
+            libc::PTRACE_INTERRUPT,
+            pid,
+            0,
+            std::ptr::null_mut::<libc::c_void>(),
+        );
     }
     let mut status: c_int = 0;
     wait_tracee(pid, &mut status);
@@ -326,7 +339,12 @@ pub fn spawn(cmd: &[String], filter: Option<&str>) -> io::Result<()> {
         .stderr(Stdio::inherit());
     unsafe {
         child.pre_exec(|| {
-            libc::ptrace(libc::PTRACE_TRACEME, 0, 0, std::ptr::null_mut::<libc::c_void>());
+            libc::ptrace(
+                libc::PTRACE_TRACEME,
+                0,
+                0,
+                std::ptr::null_mut::<libc::c_void>(),
+            );
             Ok(())
         });
     }

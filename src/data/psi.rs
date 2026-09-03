@@ -56,6 +56,9 @@ mod tests {
 
     #[test]
     fn psi_ignores_full_only_files() {
-        assert_eq!(some_from("full avg10=9.99 avg60=8.88 avg300=7.77 total=1\n"), (0.0, 0.0, 0.0));
+        assert_eq!(
+            some_from("full avg10=9.99 avg60=8.88 avg300=7.77 total=1\n"),
+            (0.0, 0.0, 0.0)
+        );
     }
 }

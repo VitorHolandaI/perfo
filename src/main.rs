@@ -10,7 +10,9 @@ enum Command {
     Version,
     Tui,
     CpuJson,
-    Bench { secs: u64 },
+    Bench {
+        secs: u64,
+    },
     Trace {
         pid: i32,
         filter: Option<String>,
