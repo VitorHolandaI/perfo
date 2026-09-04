@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 readonly repository="VitorHolandaI/perfo"
 readonly version="${PERFO_VERSION:-latest}"
@@ -43,15 +44,22 @@ temporary_dir="$(mktemp -d)"
 trap 'rm -rf "$temporary_dir"' EXIT
 
 curl --fail --location --silent --show-error \
+    --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
     "$release_url/$asset" \
     --output "$temporary_dir/$asset"
 curl --fail --location --silent --show-error \
+    --proto '=https' --tlsv1.2 --retry 3 --connect-timeout 10 --max-time 120 \
     "$release_url/$checksum" \
     --output "$temporary_dir/$checksum"
 
 (cd "$temporary_dir" && sha256sum --check "$checksum")
-tar --extract --gzip --file "$temporary_dir/$asset" --directory "$temporary_dir"
-[[ -x "$temporary_dir/perfo" ]] || fail "release archive does not contain an executable perfo"
+mapfile -t members < <(tar --list --file "$temporary_dir/$asset")
+[[ "${#members[@]}" -eq 1 && "${members[0]}" == "perfo" ]] || \
+    fail "release archive contains unexpected files (expected only perfo)"
+tar --extract --gzip --no-same-owner --no-same-permissions \
+    --file "$temporary_dir/$asset" --directory "$temporary_dir"
+[[ -f "$temporary_dir/perfo" && ! -L "$temporary_dir/perfo" && -x "$temporary_dir/perfo" ]] || \
+    fail "release archive does not contain a regular executable perfo"
 
 mkdir -p "$install_dir"
 install --mode 0755 "$temporary_dir/perfo" "$install_dir/perfo"

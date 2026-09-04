@@ -403,7 +403,11 @@ fn hwmon_temperature(device: &Path) -> Option<f32> {
         .flat_map(|entry| fs::read_dir(entry.path()).ok())
         .flatten()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("temp"))
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("temp") && name.ends_with("_input")
+        })
         .filter_map(|entry| read_u64(&entry.path()))
         .map(|millidegrees| millidegrees as f32 / 1000.0)
         .max_by(|a, b| a.total_cmp(b))
@@ -426,6 +430,18 @@ mod tests {
         assert_eq!(read_percent_from("55.5"), Some(55.5));
         assert_eq!(read_percent_from("150"), Some(100.0));
         assert_eq!(read_percent_from("bad"), None);
+    }
+
+    #[test]
+    fn hwmon_uses_input_not_temperature_limits() {
+        let base = std::env::temp_dir().join(format!("perfo-gpu-hwmon-{}", std::process::id()));
+        let hwmon = base.join("hwmon/hwmon0");
+        std::fs::create_dir_all(&hwmon).unwrap();
+        std::fs::write(hwmon.join("temp1_input"), "45000\n").unwrap();
+        std::fs::write(hwmon.join("temp1_max"), "100000\n").unwrap();
+        std::fs::write(hwmon.join("temp1_crit"), "110000\n").unwrap();
+        assert_eq!(hwmon_temperature(&base), Some(45.0));
+        std::fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

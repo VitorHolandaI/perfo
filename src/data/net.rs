@@ -56,8 +56,8 @@ fn netdev_from(raw: &str) -> HashMap<String, DevCounters> {
     out
 }
 
-/// (tcp_retrans_total, tcp_established) from /proc/net/snmp + /proc/net/tcp.
-fn tcp_stats_from(snmp_raw: &str, tcp_raw: &str) -> (u64, u64) {
+/// (tcp_retrans_total, tcp_established) from /proc/net/snmp and TCP tables.
+fn tcp_stats_from(snmp_raw: &str, tcp_raw: &str, tcp6_raw: &str) -> (u64, u64) {
     let mut retrans = 0u64;
     let mut in_snmp = false;
     for line in snmp_raw.lines() {
@@ -74,9 +74,14 @@ fn tcp_stats_from(snmp_raw: &str, tcp_raw: &str) -> (u64, u64) {
             in_snmp = true;
         }
     }
-    // Established connections = lines minus the "sl local ..." header.
-    let established = tcp_raw.lines().filter(|l| !l.starts_with("sl ")).count() as u64;
+    let established = established_from(tcp_raw) + established_from(tcp6_raw);
     (retrans, established)
+}
+
+fn established_from(raw: &str) -> u64 {
+    raw.lines()
+        .filter(|line| line.split_whitespace().nth(3) == Some(TCP_ESTABLISHED))
+        .count() as u64
 }
 
 /// Link speed (Mbps) and carrier state from /sys/class/net/<iface>/.
@@ -248,6 +253,7 @@ impl NetMonitor {
         let (retrans_total, established) = tcp_stats_from(
             &std::fs::read_to_string("/proc/net/snmp").unwrap_or_default(),
             &std::fs::read_to_string("/proc/net/tcp").unwrap_or_default(),
+            &std::fs::read_to_string("/proc/net/tcp6").unwrap_or_default(),
         );
         let retrans_s = rate(retrans_total.saturating_sub(self.prev_retrans), elapsed);
         self.prev_retrans = retrans_total;
@@ -326,6 +332,7 @@ fn socket_inodes() -> HashMap<u64, Sock> {
 /// TCP socket-table state hex codes (from net/tcp.h).
 const TCP_ESTABLISHED: &str = "01";
 const TCP_LISTEN: &str = "0A";
+const UDP_UNCONNECTED: &str = "07";
 
 /// (inode, class) from one `/proc/net/tcp`/`udp` line, when parseable.
 fn socket_line(line: &str, udp: bool) -> Option<(u64, Sock)> {
@@ -407,7 +414,12 @@ fn listening_sockets() -> Vec<(u64, u16, String, u32)> {
                 continue;
             }
             let st = fields[3];
-            if !proto.starts_with("udp") && st != TCP_LISTEN {
+            let is_listening = if proto.starts_with("udp") {
+                st == UDP_UNCONNECTED
+            } else {
+                st == TCP_LISTEN
+            };
+            if !is_listening {
                 continue;
             }
             let local = fields[1];
@@ -555,8 +567,9 @@ mod tests {
     #[test]
     fn tcp_stats_parses_retrans_and_established() {
         let snmp = "Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets CurrEstab InSegs OutSegs RetransSegs InErrs OutRsts\nTcp: 1 200 120000 -1 10 5 0 2 3 100 90 7 0 1\n";
-        let tcp = "sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n  0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000    30        0 1000 2 3\n  1: 0100007F:C350 00000000:0000 0A 00000000:00000000 00:00000000 00000000    30        0 1000 2 3\n";
-        let (retrans, established) = tcp_stats_from(snmp, tcp);
+        let tcp = "sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n  0: 0100007F:1F90 00000000:0000 01 00000000:00000000 00:00000000 00000000    30        0 1000 2 3\n  1: 0100007F:C350 00000000:0000 0A 00000000:00000000 00:00000000 00000000    30        0 1000 2 3\n  2: 0100007F:C351 00000000:0000 06 00000000:00000000 00:00000000 00000000    30        0 1000 2 3\n";
+        let tcp6 = "sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n  0: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 01 00000000:00000000 00:00000000 00000000    30        0 1001 2 3\n";
+        let (retrans, established) = tcp_stats_from(snmp, tcp, tcp6);
         assert_eq!(retrans, 7);
         assert_eq!(established, 2);
     }

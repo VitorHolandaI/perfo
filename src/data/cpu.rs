@@ -84,6 +84,16 @@ fn stat_iowait_from(raw: &str) -> (u64, u64) {
     (0, 0)
 }
 
+fn iowait_percent(previous: (u64, u64), current: (u64, u64)) -> f32 {
+    let waited = current.0.saturating_sub(previous.0);
+    let total = current.1.saturating_sub(previous.1);
+    if total == 0 {
+        0.0
+    } else {
+        (waited as f64 / total as f64 * 100.0) as f32
+    }
+}
+
 /// Last-run CPU from a /proc/<pid>/stat line. Field 39 (processor index) is
 /// the 36th whitespace token after the closing `)` of the comm field (which
 /// may itself contain spaces and parens).
@@ -329,9 +339,8 @@ fn on_cpu<F: FnOnce() -> Option<CoreType> + Send>(cpu: usize, f: F) -> Option<Co
 ///    (their cpuid 0x1A encodings differ).
 /// 2. Uniform max freq: not hybrid — shared-L2 topology decides P vs E.
 /// 3. No cpufreq at all: best-effort cpuid 0x1A probe per core.
-fn core_types_of() -> Vec<CoreType> {
-    let max_freqs = per_core_max_freqs();
-    let buckets = freq_buckets(&max_freqs);
+fn core_types_of(max_freqs: &[u64]) -> Vec<CoreType> {
+    let buckets = freq_buckets(max_freqs);
     if buckets.len() >= 2 {
         let p_max = buckets[0];
         let lpe_max = buckets.get(2).copied();
@@ -393,8 +402,12 @@ pub struct CpuMonitor {
     stat_prev: (u64, u64),
     /// When the last full refresh happened (drives I/O rate conversion).
     last_full: Option<Instant>,
+    /// I/O wait percentage between the last two /proc/stat samples.
+    iowait_percent: f32,
     /// P/E/L classification, probed once via CPUID 0x1A (pinned threads).
     core_types: Vec<CoreType>,
+    /// Per-core maximum frequencies, stable until CPU topology changes.
+    max_freq_mhz: Vec<u64>,
     /// Overall CPU usage ring (newest last) for the history graph.
     history: VecDeque<f32>,
 }
@@ -459,9 +472,13 @@ impl CpuMonitor {
             io_window_start: Instant::now(),
             stat_prev: (0, 0),
             last_full: None,
-            core_types: core_types_of(),
+            iowait_percent: 0.0,
+            core_types: Vec::new(),
+            max_freq_mhz: Vec::new(),
             history: VecDeque::new(),
         };
+        monitor.max_freq_mhz = per_core_max_freqs();
+        monitor.core_types = core_types_of(&monitor.max_freq_mhz);
         // Seed CPU deltas so the first real refresh has a window to measure.
         monitor.refresh();
         monitor
@@ -487,6 +504,7 @@ impl CpuMonitor {
     /// Expensive (tens of thousands of /proc reads); call sparingly (~every 2s).
     pub fn refresh(&mut self) {
         Self::do_refresh(&mut self.sys);
+        self.components.refresh(false);
         self.disks.refresh();
         self.gpu.refresh();
         self.net.refresh();
@@ -500,6 +518,8 @@ impl CpuMonitor {
             HashMap::with_capacity(self.sys.processes().len());
         let mut io_rates: HashMap<u32, (u64, u64)> =
             HashMap::with_capacity(self.sys.processes().len());
+        let mut io_deltas: HashMap<u32, (u64, u64)> =
+            HashMap::with_capacity(self.sys.processes().len());
         for pid in self.sys.processes().keys() {
             let pid = pid.as_u32();
             if let Some(c) = last_cpu_of(pid) {
@@ -509,13 +529,16 @@ impl CpuMonitor {
             // keeps the read cheap (~µs) once warm.
             if let Some((rb, wb)) = proc_io_of(pid) {
                 if let Some((prb, pwb)) = self.io_prev.get(&pid) {
+                    let read_delta = rb.saturating_sub(*prb);
+                    let write_delta = wb.saturating_sub(*pwb);
                     io_rates.insert(
                         pid,
                         (
-                            rate_bps(rb.saturating_sub(*prb), elapsed),
-                            rate_bps(wb.saturating_sub(*pwb), elapsed),
+                            rate_bps(read_delta, elapsed),
+                            rate_bps(write_delta, elapsed),
                         ),
                     );
+                    io_deltas.insert(pid, (read_delta, write_delta));
                 }
                 io_cur.insert(pid, (rb, wb));
             }
@@ -527,15 +550,19 @@ impl CpuMonitor {
             self.io_window.clear();
             self.io_window_start = now;
         }
-        for (pid, (rb, wb)) in io_rates.iter() {
-            let e = self.io_window.entry(*pid).or_insert((0, 0));
-            e.0 = e.0.saturating_add(rb.saturating_mul(elapsed as u64));
-            e.1 = e.1.saturating_add(wb.saturating_mul(elapsed as u64));
+        for (pid, (rb, wb)) in io_deltas {
+            let e = self.io_window.entry(pid).or_insert((0, 0));
+            e.0 = e.0.saturating_add(rb);
+            e.1 = e.1.saturating_add(wb);
         }
         self.io_prev = io_cur;
         self.io_rates = io_rates;
         let stat = std::fs::read_to_string("/proc/stat").unwrap_or_default();
         let (iw, tot) = stat_iowait_from(&stat);
+        self.iowait_percent = self
+            .last_full
+            .map(|_| iowait_percent(self.stat_prev, (iw, tot)))
+            .unwrap_or(0.0);
         self.stat_prev = (iw, tot);
         self.last_full = Some(now);
     }
@@ -547,6 +574,10 @@ impl CpuMonitor {
         self.sys.refresh_memory();
         self.components.refresh(false);
         self.gpu.refresh();
+        let stat = std::fs::read_to_string("/proc/stat").unwrap_or_default();
+        let current = stat_iowait_from(&stat);
+        self.iowait_percent = iowait_percent(self.stat_prev, current);
+        self.stat_prev = current;
     }
 
     pub fn snapshot(&mut self) -> CpuSnapshot {
@@ -568,16 +599,10 @@ impl CpuMonitor {
         }
         // iowait needs a delta between two /proc/stat samples; stat_prev
         // holds the latest, so the first snapshot reports 0.
-        let (iw, tot) = self.stat_prev;
-        let iowait_percent = if tot > 0 {
-            (iw as f64 / tot as f64 * 100.0) as f32
-        } else {
-            0.0
-        };
         let per_core: Vec<f32> = self.sys.cpus().iter().map(|c| c.cpu_usage()).collect();
         let per_core_types = self.core_types.clone();
         let per_core_freq_mhz: Vec<u64> = self.sys.cpus().iter().map(|c| c.frequency()).collect();
-        let per_core_max_freq_mhz = per_core_max_freqs();
+        let per_core_max_freq_mhz = self.max_freq_mhz.clone();
         let cpu_temp_c: Option<f32> = self
             .components
             .list()
@@ -658,7 +683,7 @@ impl CpuMonitor {
             fans: self.fans.snapshot(),
             gpu: self.gpu.snapshot(),
             overall_percent,
-            iowait_percent,
+            iowait_percent: self.iowait_percent,
             per_core,
             core_count: self.sys.cpus().len(),
             per_core_types,
@@ -804,6 +829,12 @@ mod tests {
     #[test]
     fn stat_iowait_missing_line_is_zero() {
         assert_eq!(stat_iowait_from("cpu0 1 2 3 4 5\n"), (0, 0));
+    }
+
+    #[test]
+    fn iowait_uses_counter_delta() {
+        assert_eq!(iowait_percent((100, 1_000), (110, 1_100)), 10.0);
+        assert_eq!(iowait_percent((200, 2_000), (100, 1_000)), 0.0);
     }
 
     #[test]

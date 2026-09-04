@@ -46,10 +46,16 @@ pub fn system() -> Option<Theme> {
     let path = format!("{home}/.local/state/omarchy/current/theme/colors.toml");
     let raw = std::fs::read_to_string(path).ok()?;
 
+    Some(from_raw(&raw))
+}
+
+fn from_raw(raw: &str) -> Theme {
     let mut t = Theme::DEFAULT;
     t.name = "omarchy";
     for line in raw.lines() {
-        let (k, v) = line.split_once('=')?;
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let v = v.trim().trim_matches('"');
         if !v.starts_with('#') || v.len() < 7 {
             continue;
@@ -67,5 +73,16 @@ pub fn system() -> Option<Theme> {
             _ => {}
         }
     }
-    Some(t)
+    t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_ignores_comments_and_keeps_assignments() {
+        let theme = from_raw("# comment\n[colors]\naccent = \"#123456\"\n");
+        assert_eq!(theme.accent, Color::Rgb(0x12, 0x34, 0x56));
+    }
 }

@@ -81,12 +81,14 @@ and `rust-doctor` when installed. The current audit reports allowed transitive
 warnings for `paste` and `lru` through `ratatui`; they are tracked rather than
 hidden.
 
-GitHub runs the dependency inventory and security checks from
+GitHub runs the dependency inventory from
 `.github/workflows/dependencies.yml`. The workflow uses the committed
 `Cargo.lock`, prints the dependency tree and duplicate versions in the job
-summary, and runs dependency review on pull requests. GitHub Actions themselves
-are third-party inputs and should be pinned to commit SHAs when the repository
-enters a stricter supply-chain hardening phase.
+summary, and runs dependency review on pull requests. GitHub Actions are pinned
+to commit SHAs and the release workflow separates read-only builds from the
+write-capable publication job.
+The dedicated `.github/workflows/security.yml` runs the advisory and policy
+checks.
 
 ## Current gaps
 
@@ -95,5 +97,5 @@ enters a stricter supply-chain hardening phase.
 - NVIDIA GPU support is optional and uses dynamically loaded NVML.
 - GPU values are exposed in JSON and the widget GPU page; richer device memory
   and power fields remain backend-dependent.
-- The plugin release package still needs root-level publication metadata,
-  license, and preview assets.
+- QML validation currently checks manifest references; a full Quickshell runtime
+  test is not available on the CI runner.

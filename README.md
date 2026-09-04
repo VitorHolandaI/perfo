@@ -35,17 +35,30 @@ Supply-chain checks and their current status are documented in
 
 GitHub automation in [`.github/workflows/dependencies.yml`](.github/workflows/dependencies.yml)
 publishes the direct dependency tree and duplicate-version report in the
-workflow summary, runs `cargo audit` and `cargo deny check`, and reviews changed
-dependencies on pull requests.
+workflow summary and reviews changed dependencies on pull requests. The
+dedicated [security workflow](.github/workflows/security.yml) runs `cargo audit`
+and `cargo deny check` without duplicating that work.
 
 ## Ubuntu Install
 
 The latest Linux x86_64 release can be downloaded and installed without Rust:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
-bash /tmp/perfo-install.sh
-rm /tmp/perfo-install.sh
+set -euo pipefail
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+release_url=https://github.com/VitorHolandaI/perfo/releases/latest/download
+mkdir -p "$HOME/.local/bin"
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  "$release_url/perfo-linux-x86_64.tar.gz" -o "$tmp_dir/perfo.tar.gz"
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  "$release_url/perfo-linux-x86_64.sha256" -o "$tmp_dir/perfo.sha256"
+(cd "$tmp_dir" && sha256sum --check perfo.sha256)
+mapfile -t members < <(tar --list --file "$tmp_dir/perfo.tar.gz")
+[[ "${#members[@]}" -eq 1 && "${members[0]}" == "perfo" ]]
+tar --extract --gzip --file "$tmp_dir/perfo.tar.gz" --directory "$tmp_dir"
+[[ -f "$tmp_dir/perfo" && ! -L "$tmp_dir/perfo" && -x "$tmp_dir/perfo" ]]
+install --mode 0755 "$tmp_dir/perfo" "$HOME/.local/bin/perfo"
 ```
 
 The installer verifies the release checksum and installs `perfo` at
@@ -59,13 +72,27 @@ export PATH="$HOME/.local/bin:$PATH"
 To install a specific release, set `PERFO_VERSION`, for example:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
-PERFO_VERSION=v0.1.5 bash /tmp/perfo-install.sh
-rm /tmp/perfo-install.sh
+set -euo pipefail
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+PERFO_VERSION=v0.1.5
+release_url="https://github.com/VitorHolandaI/perfo/releases/download/$PERFO_VERSION"
+mkdir -p "$HOME/.local/bin"
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  "$release_url/perfo-linux-x86_64.tar.gz" -o "$tmp_dir/perfo.tar.gz"
+curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+  "$release_url/perfo-linux-x86_64.sha256" -o "$tmp_dir/perfo.sha256"
+(cd "$tmp_dir" && sha256sum --check perfo.sha256)
+mapfile -t members < <(tar --list --file "$tmp_dir/perfo.tar.gz")
+[[ "${#members[@]}" -eq 1 && "${members[0]}" == "perfo" ]]
+tar --extract --gzip --file "$tmp_dir/perfo.tar.gz" --directory "$tmp_dir"
+[[ -f "$tmp_dir/perfo" && ! -L "$tmp_dir/perfo" && -x "$tmp_dir/perfo" ]]
+install --mode 0755 "$tmp_dir/perfo" "$HOME/.local/bin/perfo"
 ```
 
-The release workflow publishes the binary when a `v*` tag is pushed. The
-installer currently targets Linux `x86_64`.
+The release workflow publishes the binary when a matching `vX.Y.Z` tag is
+pushed; the tag must match both package versions. The installer currently
+targets Linux `x86_64`.
 
 ## Run In The Terminal
 
@@ -131,8 +158,6 @@ omarchy plugin add https://github.com/VitorHolandaI/perfo.git --enable
 For a manual local installation, copy the root plugin files:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
-bash /tmp/perfo-install.sh
 mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
 cp -- *.qml manifest.json "$HOME/.config/omarchy/plugins/vitor.perfo/"
 omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"
@@ -154,8 +179,8 @@ omarchy plugin disable vitor.perfo
 omarchy plugin remove vitor.perfo --yes
 ```
 
-The plugin does not require `sudo`, does not overwrite shell configuration, and
-is licensed under MIT. Its monitor runtime dependency is the `perfo` binary,
+The plugin needs no elevated privileges, does not overwrite shell configuration,
+and is licensed under MIT. Its monitor runtime dependency is the `perfo` binary,
 which can be installed from the GitHub release or supplied through `PERFO_BIN`.
 
 ### Plugin Dependencies
@@ -202,8 +227,8 @@ are indexed in [`docs/README.md`](docs/README.md).
 
 ```bash
 cargo fmt --check
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
 ```
 
 Build an optimized binary without installing it:

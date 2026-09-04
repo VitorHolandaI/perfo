@@ -177,6 +177,9 @@ pub(super) fn unique_disks(
 /// fewer samples than width (graph grows from the left).
 pub(super) fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
     const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
+    if width == 0 {
+        return String::new();
+    }
     if samples.is_empty() {
         return " ".repeat(width);
     }
@@ -1402,6 +1405,12 @@ mod tests {
     fn sparkline_auto_scales_rates_without_percent_saturation() {
         let q = VecDeque::from([0.0, 842_000_000.0, 0.0]);
         assert_eq!(sparkline(&q, 3, None), "⡀⣿⡀");
+    }
+
+    #[test]
+    fn sparkline_handles_zero_width() {
+        let samples = VecDeque::from([10.0, 20.0]);
+        assert_eq!(sparkline(&samples, 0, None), "");
     }
 
     #[test]

@@ -96,6 +96,22 @@ fn get_regs(pid: i32) -> io::Result<user_regs_struct> {
     Ok(regs)
 }
 
+fn ptrace_checked(
+    request: libc::c_uint,
+    pid: libc::pid_t,
+    addr: *mut libc::c_void,
+    data: *mut libc::c_void,
+) -> io::Result<()> {
+    // SAFETY: ptrace owns the request-specific interpretation of these
+    // pointers; callers pass valid buffers or null for requests without one.
+    let result = unsafe { libc::ptrace(request, pid, addr, data) };
+    if result == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 fn fmt_arg(v: u64) -> String {
     if v < 10 {
         format!("{v}")
@@ -127,7 +143,7 @@ fn read_cstr(pid: i32, addr: u64) -> Option<String> {
             }
             out.push(b);
         }
-        cur += 8;
+        cur = cur.checked_add(8)?;
     }
     None
 }
@@ -200,21 +216,17 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
     // at entry and leaves orig_rax as the syscall number on modern kernels, so
     // classify the first stop by rax and toggle afterwards.
     let mut at_entry: Option<bool> = None;
+    let mut resume_signal: Option<c_int> = None;
 
     loop {
         if INTERRUPTED.load(Ordering::SeqCst) {
             break;
         }
-        unsafe {
-            // SAFETY: pid is a traced process stopped at a syscall boundary;
-            // PTRACE_SYSCALL resumes it into the next syscall-stop.
-            libc::ptrace(
-                libc::PTRACE_SYSCALL,
-                pid,
-                0,
-                std::ptr::null_mut::<libc::c_void>(),
-            );
-        }
+        let signal = resume_signal
+            .take()
+            .map(|signal| signal as *mut libc::c_void)
+            .unwrap_or(std::ptr::null_mut());
+        ptrace_checked(libc::PTRACE_SYSCALL, pid, std::ptr::null_mut(), signal)?;
         if wait_tracee(pid, &mut status)? {
             break;
         }
@@ -262,27 +274,24 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
                 }
             }
         } else {
-            // signal stop: forward it
-            unsafe {
-                // SAFETY: resuming a stopped tracee by forwarding its signal;
-                // pid is still traced and stopped.
-                libc::ptrace(libc::PTRACE_SYSCALL, pid, 0, sig as *mut libc::c_void);
-            }
+            // Signal stop: forward it on the next resume, after checking the
+            // stop status and avoiding a second ptrace resume in this cycle.
+            resume_signal = Some(sig);
         }
     }
 
     if let Some(name) = pending.take() {
         emit(format!("{name} = <interrupted>"));
     }
-    unsafe {
-        // SAFETY: pid is stopped under our ptrace control; PTRACE_DETACH
-        // releases it so the tracee continues normally.
-        libc::ptrace(
-            libc::PTRACE_DETACH,
-            pid,
-            0,
-            std::ptr::null_mut::<libc::c_void>(),
-        );
+    if let Err(error) = ptrace_checked(
+        libc::PTRACE_DETACH,
+        pid,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    ) {
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -301,21 +310,27 @@ fn attach_preamble(pid: i32) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         // Get an initial stop so we can start issuing PTRACE_SYSCALL.
-        libc::ptrace(
+        ptrace_checked(
             libc::PTRACE_INTERRUPT,
             pid,
-            0,
-            std::ptr::null_mut::<libc::c_void>(),
-        );
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )?;
     }
     let mut status: c_int = 0;
-    wait_tracee(pid, &mut status)?;
+    if wait_tracee(pid, &mut status)? || !wifstopped(status) {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "tracee did not stop after ptrace attach",
+        ));
+    }
     Ok(())
 }
 
 /// CLI: trace an existing process. Ctrl+C detaches and lets it continue.
 pub fn attach(pid: i32, filter: Option<&str>) -> io::Result<()> {
     install_sigint();
+    INTERRUPTED.store(false, Ordering::SeqCst);
     attach_preamble(pid)?;
     let stdout = io::stdout();
     let mut emit = |s: String| {
@@ -329,7 +344,14 @@ pub fn spawn(cmd: &[String], filter: Option<&str>) -> io::Result<()> {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
+    if cmd.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "trace command is empty (expected executable and optional arguments)",
+        ));
+    }
     install_sigint();
+    INTERRUPTED.store(false, Ordering::SeqCst);
     let mut child = Command::new(&cmd[0]);
     child
         .args(&cmd[1..])
@@ -338,13 +360,19 @@ pub fn spawn(cmd: &[String], filter: Option<&str>) -> io::Result<()> {
         .stderr(Stdio::inherit());
     unsafe {
         child.pre_exec(|| {
-            libc::ptrace(
+            // SAFETY: PTRACE_TRACEME uses no pointed-to data and runs in the
+            // child before exec replaces its address space.
+            let result = libc::ptrace(
                 libc::PTRACE_TRACEME,
                 0,
                 0,
                 std::ptr::null_mut::<libc::c_void>(),
             );
-            Ok(())
+            if result == -1 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
         });
     }
     let child = child.spawn()?;
@@ -352,17 +380,17 @@ pub fn spawn(cmd: &[String], filter: Option<&str>) -> io::Result<()> {
 
     // Child stops with SIGTRAP right after exec.
     let mut status: c_int = 0;
-    wait_tracee(pid, &mut status)?;
+    if wait_tracee(pid, &mut status)? || !wifstopped(status) {
+        return Err(io::Error::other("tracee did not stop after exec"));
+    }
     // TRACEME doesn't take options; enable TRACESYSGOOD now so syscall stops
     // arrive as SIGTRAP|0x80 instead of plain SIGTRAP.
-    unsafe {
-        libc::ptrace(
-            libc::PTRACE_SETOPTIONS,
-            pid,
-            0,
-            libc::PTRACE_O_TRACESYSGOOD as *mut libc::c_void,
-        );
-    }
+    ptrace_checked(
+        libc::PTRACE_SETOPTIONS,
+        pid,
+        std::ptr::null_mut(),
+        libc::PTRACE_O_TRACESYSGOOD as *mut libc::c_void,
+    )?;
     let stdout = io::stdout();
     let mut emit = |s: String| {
         let _ = writeln!(stdout.lock(), "{s}");
@@ -431,5 +459,10 @@ mod tests {
     fn wait_tracee_returns_error_for_unknown_pid() {
         let mut status = 0;
         assert!(wait_tracee(i32::MAX, &mut status).is_err());
+    }
+
+    #[test]
+    fn spawn_rejects_empty_commands() {
+        assert!(spawn(&[], None).is_err());
     }
 }

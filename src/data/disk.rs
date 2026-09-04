@@ -14,8 +14,8 @@ const BYTES_PER_SECTOR: u64 = 512;
 const BYTES_PER_KIB: u64 = 1024;
 /// Milliseconds per second.
 const MS_PER_SEC: f32 = 1000.0;
-/// /proc/diskstats fields read into RawCounters (14 = discards + flush).
-const DISKSTAT_FIELDS: usize = 14;
+/// /proc/diskstats fields read into RawCounters (17 = discard + flush data).
+const DISKSTAT_FIELDS: usize = 17;
 /// Minimum fields a line must have (pre-4.18 kernels lack discard/flush).
 const DISKSTAT_MIN_FIELDS: usize = 11;
 
@@ -136,8 +136,8 @@ fn diskstats_from(raw: &str) -> HashMap<String, RawCounters> {
                 ms_doing_io: n[9],
                 ms_weighted_io: n[10],
                 discards: n[11],
-                discard_sectors: n[12],
-                flushes: n[13],
+                discard_sectors: n[13],
+                flushes: n[15],
             },
         );
     }
@@ -221,6 +221,7 @@ pub struct DiskMonitor {
     last_refresh: Option<Instant>,
     prev_stats: HashMap<String, RawCounters>,
     io_stats: HashMap<String, DiskIoStats>,
+    usage_rates: HashMap<String, (u64, u64)>,
     /// PSI "some" I/O pressure (10s/60s/300s) from /proc/pressure/io.
     io_pressure: [f64; 3],
     /// friendly dm name -> dm-N (e.g. "root" -> "dm-0"); dm-N is what
@@ -244,6 +245,7 @@ impl DiskMonitor {
             last_refresh: None,
             prev_stats: HashMap::new(),
             io_stats: HashMap::new(),
+            usage_rates: HashMap::new(),
             io_pressure: [0.0; 3],
             dm_aliases: HashMap::new(),
             history: HashMap::new(),
@@ -261,6 +263,23 @@ impl DiskMonitor {
             .unwrap_or(0.0);
         let raw = std::fs::read_to_string("/proc/diskstats").unwrap_or_default();
         let cur = diskstats_from(&raw);
+        self.usage_rates = self
+            .disks
+            .list()
+            .iter()
+            .map(|disk| {
+                let name = disk.name().to_string_lossy();
+                let key = name.rsplit('/').next().unwrap_or(&name).to_string();
+                let usage = disk.usage();
+                (
+                    key,
+                    (
+                        rate(usage.read_bytes, elapsed),
+                        rate(usage.written_bytes, elapsed),
+                    ),
+                )
+            })
+            .collect();
         // device-mapper devices show as dm-N; resolve to the friendly name
         // (e.g. dm-0 -> "root") so they match sysinfo's /dev/mapper/root.
         let mut dm_aliases = HashMap::new();
@@ -323,10 +342,6 @@ impl DiskMonitor {
         const REAL_FS: [&str; 9] = [
             "btrfs", "vfat", "ext4", "xfs", "f2fs", "ntfs", "zfs", "exfat", "ext2",
         ];
-        let elapsed = self
-            .last_refresh
-            .map(|t| t.elapsed().as_secs_f32())
-            .unwrap_or(0.0);
         self.disks
             .list()
             .iter()
@@ -354,8 +369,8 @@ impl DiskMonitor {
                     } else {
                         0.0
                     },
-                    read_bps: rate(u.read_bytes, elapsed),
-                    write_bps: rate(u.written_bytes, elapsed),
+                    read_bps: self.usage_rates.get(&key).map(|rates| rates.0).unwrap_or(0),
+                    write_bps: self.usage_rates.get(&key).map(|rates| rates.1).unwrap_or(0),
                     total_read_bytes: u.total_read_bytes,
                     total_written_bytes: u.total_written_bytes,
                     temp_c: nvme_temp_c(
@@ -392,8 +407,12 @@ fn scan_hwmon(dir: &Path) -> Option<f32> {
         if !e.file_name().to_string_lossy().starts_with("hwmon") {
             continue;
         }
-        let raw = std::fs::read_to_string(e.path().join("temp1_input")).ok()?;
-        let milli: i64 = raw.trim().parse().ok()?;
+        let Ok(raw) = std::fs::read_to_string(e.path().join("temp1_input")) else {
+            continue;
+        };
+        let Ok(milli) = raw.trim().parse::<i64>() else {
+            continue;
+        };
         let is_nvme = std::fs::read_to_string(e.path().join("name"))
             .map(|n| n.trim() == "nvme")
             .unwrap_or(false);
@@ -442,7 +461,7 @@ mod tests {
     use super::*;
 
     fn line() -> &'static str {
-        "259 0 nvme0n1 1000 0 100000 500 200 0 40000 400 0 600 800 50 2000 30\n"
+        "259 0 nvme0n1 1000 0 100000 500 200 0 40000 400 0 600 800 50 0 2000 0 30\n"
     }
 
     #[test]
@@ -503,7 +522,8 @@ mod tests {
     fn io_stats_computes_discard_and_flush() {
         let prev = diskstats_from(line());
         // +100 discards, +8000 sectors, +200 flushes in 2s.
-        let cur_raw = "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 150 10000 230\n";
+        let cur_raw =
+            "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 150 0 10000 0 230\n";
         let cur = diskstats_from(cur_raw);
         let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 2.0);
         assert_eq!(s.d_s, 50);
@@ -568,7 +588,8 @@ mod tests {
     fn io_stats_computes_await_and_busy() {
         let prev = diskstats_from(line());
         // 2s later: 2000 reads done, 400ms total reading, 2000ms doing io.
-        let cur_raw = "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 50 2000 30\n";
+        let cur_raw =
+            "259 0 nvme0n1 3000 0 300000 900 400 0 80000 800 0 2600 2800 50 0 2000 0 30\n";
         let cur = diskstats_from(cur_raw);
         let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 2.0);
         assert_eq!(s.r_s, 1000);
@@ -593,7 +614,8 @@ mod tests {
     #[test]
     fn io_stats_computes_merge_and_req_size() {
         let prev = diskstats_from(line());
-        let cur_raw = "259 0 nvme0n1 2000 1000 200000 600 300 150 50000 500 0 700 900 50 2000 30\n";
+        let cur_raw =
+            "259 0 nvme0n1 2000 1000 200000 600 300 150 50000 500 0 700 900 50 0 2000 0 30\n";
         let cur = diskstats_from(cur_raw);
         let s = io_stats_from(&prev["nvme0n1"], &cur["nvme0n1"], 1.0);
         // 1000 extra merged of 2000 total (1000 reads + 1000 merged) -> 50%

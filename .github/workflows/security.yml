@@ -7,14 +7,23 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          tool: cargo-audit,cargo-deny
+          persist-credentials: false
+      - uses: taiki-e/install-action@928a909c424ccbbe9d023b1739c42bdf24e079e2 # v2
+        with:
+          tool: cargo-audit@0.22.2,cargo-deny@0.20.2
       - name: cargo-audit (RustSec advisories)
         run: |
           # taiki-e/install-action instala em ~/.install-action/bin; o act

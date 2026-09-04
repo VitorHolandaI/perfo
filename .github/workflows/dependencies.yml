@@ -1,4 +1,4 @@
-name: Dependencies and Security
+name: Dependency inventory
 
 on:
   push:
@@ -10,26 +10,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dependencies-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cargo-security:
     name: Cargo inventory and security
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # stable
+        with:
+          toolchain: 1.98.0
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - name: Cache Cargo metadata
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Dependency inventory
         shell: bash
@@ -47,28 +55,12 @@ jobs:
             cargo metadata --format-version 1 --locked | jq '.packages | length'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Cargo audit
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit,cargo-deny
-
-      - name: Run Cargo audit
-        run: |
-          export PATH="$HOME/.install-action/bin:$PATH"
-          cargo audit
-
-      - name: Run Cargo deny
-        run: |
-          export PATH="$HOME/.install-action/bin:$PATH"
-          cargo deny check
-
   dependency-review:
     name: Review dependency changes
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@9538e6e31ca885c263da1e3620f624d7df373284 # v4

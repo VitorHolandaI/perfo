@@ -7,7 +7,10 @@ on:
 
 permissions:
   contents: read
-  security-events: write
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   RUSTQUAL_BASELINE: .github/rustqual-baseline.json
@@ -19,15 +22,18 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # stable
+        with:
+          toolchain: 1.98.0
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Instala rustqual + rust-doctor
         run: |
-          cargo install rustqual --locked
-          cargo install rust-doctor --locked
+          cargo install rustqual --version 1.8.2 --locked
+          cargo install rust-doctor --version 0.6.0 --locked
       - name: rustqual — gate de regressao vs baseline (findings + score)
         run: |
           rustqual . --json --no-fail > current.json
@@ -44,9 +50,13 @@ jobs:
           rustqual . --format github --no-fail
       - name: rustqual — SARIF (code scanning)
         run: rustqual . --format sarif --no-fail > rustqual.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - name: Store rustqual SARIF
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          sarif_file: rustqual.sarif
+          name: rustqual-sarif
+          path: rustqual.sarif
+          if-no-files-found: error
       - name: rust-doctor — gate de score
         run: |
           score=$(rust-doctor --json . | jq -r '.audit.score.value')
@@ -55,3 +65,19 @@ jobs:
             echo "::error::score $score abaixo do limite $RUSTDOCTOR_THRESHOLD"
             exit 1
           fi
+
+  upload-sarif:
+    name: Upload quality report
+    if: github.event_name == 'push'
+    needs: analyze
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rustqual-sarif
+      - uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        with:
+          sarif_file: rustqual.sarif

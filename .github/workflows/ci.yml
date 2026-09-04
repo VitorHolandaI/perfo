@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -12,14 +19,29 @@ jobs:
   test-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # stable
+        with:
+          toolchain: 1.98.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Format
         run: cargo fmt --check
       - name: Clippy (warnings sao erro)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - name: Testes
-        run: cargo test
+        run: cargo test --all-features --locked
+      - name: Validate plugin manifest
+        run: |
+          jq -e '.schemaVersion == 1 and .id == "vitor.perfo" and .entryPoints.barWidget == "BarWidget.qml"' manifest.json
+          test -f BarWidget.qml
+          test -f Panel.qml
+      - name: QML syntax
+        run: |
+          if ! command -v qmllint >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y qt6-declarative-dev-tools
+          fi
+          qmllint BarWidget.qml Panel.qml ProcessGrid.qml GpuPage.qml
