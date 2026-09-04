@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "vitor.perfo",
   "name": "Perfo",
-  "version": "0.1.1",
+  "version": "0.1.5",
   "author": "Vitor",
-  "description": "System performance monitor",
+  "description": "CPU, memory, I/O, network, filesystem, fan, and GPU performance",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "Perfo",
-    "description": "CPU, memory and network performance",
+    "description": "CPU, memory, I/O, network, filesystem, fan, and GPU performance",
     "category": "System",
     "allowMultiple": false
   }

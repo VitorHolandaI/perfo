@@ -113,21 +113,28 @@ portable option and does not require changing global ptrace policy.
 
 ## Omarchy Plugin
 
-The plugin requires the same binary and runs:
+The repository root is also the installable `vitor.perfo` Omarchy plugin. The
+plugin requires the same binary and runs:
 
 ```text
 perfo stream --json
 ```
 
-Install the binary first, then install the plugin files:
+Install the binary first, then install the plugin from GitHub:
+
+```bash
+omarchy plugin add https://github.com/VitorHolandaI/perfo.git --enable
+```
+
+For a manual local installation, copy the root plugin files:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
 bash /tmp/perfo-install.sh
 mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
-cp plugin/vitor.perfo/* "$HOME/.config/omarchy/plugins/vitor.perfo/"
+cp -- *.qml manifest.json "$HOME/.config/omarchy/plugins/vitor.perfo/"
 omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"
-omarchy plugin enable vitor.perfo --section right
+omarchy plugin enable vitor.perfo right
 omarchy restart shell
 ```
 
@@ -137,6 +144,22 @@ Set `PERFO_BIN` before restarting the shell when the binary is somewhere else:
 export PERFO_BIN="$HOME/bin/perfo"
 omarchy restart shell
 ```
+
+Installations made with `omarchy plugin add` can be removed safely with:
+
+```bash
+omarchy plugin disable vitor.perfo
+omarchy plugin remove vitor.perfo --yes
+```
+
+The plugin does not require `sudo`, does not overwrite shell configuration, and
+is licensed under MIT. Its only runtime dependency is the `perfo` binary, which
+can be installed from the GitHub release or supplied through `PERFO_BIN`.
+
+For the marketplace, an optional root-level `preview.png` (also `jpg`, `jpeg`,
+`webp`, or `avif`) is used as the listing preview. Additional screenshots can
+be stored under `docs/images/` and linked from this README; they are not
+attached through the submission form.
 
 ## Data Sources
 
