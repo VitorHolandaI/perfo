@@ -13,7 +13,7 @@ Panel {
   property var hostWidget: null
   property var snapshot: null
   property int page: 0
-  readonly property var pageNames: ["DASH", "CPU", "IO", "NET", "MEM", "DISKS", "FANS"]
+  readonly property var pageNames: ["DASH", "CPU", "IO", "NET", "MEM", "DISKS", "FANS", "GPU"]
   readonly property var barIdentity: hostWidget || root
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -90,6 +90,11 @@ Panel {
   function fans() {
     return root.snapshot && root.snapshot.fans && root.snapshot.fans.fans
       ? root.snapshot.fans.fans.slice(0, 6) : []
+  }
+
+  function gpus() {
+    return root.snapshot && root.snapshot.gpu && root.snapshot.gpu.devices
+      ? root.snapshot.gpu.devices : []
   }
 
   function processName(command, pid) {
@@ -235,8 +240,9 @@ Panel {
              Text { width: root.metricValueWidth * 2; text: root.snapshot ? "NET " + root.formatRate(root.snapshot.net.totals.rx_bps) + " / " + root.formatRate(root.snapshot.net.totals.tx_bps) : "NET --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
              Text { width: root.metricValueWidth * 2; text: root.snapshot ? "IO " + root.formatRate(root.totalRead()) + " / " + root.formatRate(root.totalWrite()) : "IO --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
           }
-          Text { text: root.snapshot && root.disks().length > 0 ? "DISK " + root.disks()[0].mount + " " + Number(root.disks()[0].percent).toFixed(0) + "%" : "DISK --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-          Text { text: root.snapshot ? "FANS " + root.fans().length : "FANS --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           Text { text: root.snapshot && root.disks().length > 0 ? "DISK " + root.disks()[0].mount + " " + Number(root.disks()[0].percent).toFixed(0) + "%" : "DISK --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           Text { text: root.snapshot ? "FANS " + root.fans().length : "FANS --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           Text { text: root.gpus().length > 0 ? "GPU " + root.gpus()[0].vendor + " " + (root.gpus()[0].usage_percent === null ? "--" : Number(root.gpus()[0].usage_percent).toFixed(0) + "%") : "GPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
            Text { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            Grid {
              id: dashboardProcessGrid
@@ -448,8 +454,8 @@ Panel {
           }
         }
 
-        Column {
-          id: fanPage
+         Column {
+           id: fanPage
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 6
@@ -463,9 +469,11 @@ Panel {
                Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
                Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
                Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-             }
-          }
-        }
+           }
+         }
+
+         GpuPage { anchors.fill: parent; visible: root.page === 7; devices: root.gpus(); foreground: root.foreground; fontFamily: root.fontFamily }
+       }
       }
 
       Rectangle {
