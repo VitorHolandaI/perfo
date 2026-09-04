@@ -482,9 +482,9 @@ Panel {
            }
          }
 
-          GpuPage {
-            anchors.fill: parent
-            visible: root.page === 7
+GpuPage {
+             width: parent.width
+             visible: root.page === 7
             devices: root.gpus()
             processes: root.snapshot && root.snapshot.processes ? root.snapshot.processes : []
             totalMemoryBytes: root.snapshot ? root.snapshot.total_mem_bytes : 0
