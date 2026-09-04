@@ -13,6 +13,10 @@ fn snapshot_has_core_sections() {
     assert!(snap.core_count > 0, "no CPUs detected");
     assert_eq!(snap.per_core.len(), snap.core_count);
     assert!(!snap.processes.is_empty(), "no processes in snapshot");
+    assert!(snap
+        .processes
+        .iter()
+        .all(|process| !process.name.is_empty()));
     assert!(!snap.disks.is_empty(), "no disks in snapshot");
     assert!(!snap.net.ifaces.is_empty(), "no network interfaces");
 }
@@ -29,4 +33,9 @@ fn snapshot_serializes_to_json() {
     assert!(json["disks"].is_array());
     assert!(json["per_core"].is_array());
     assert!(json["processes"].is_array());
+    assert!(json["cpu_history"].is_array());
+    assert!(json["net"]["rx_history"].is_array());
+    assert!(json["net"]["tx_history"].is_array());
+    assert!(json["gpu"]["devices"].is_array());
+    assert!(json["fans"]["fans"].is_array());
 }

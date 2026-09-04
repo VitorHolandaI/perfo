@@ -132,9 +132,7 @@ pub struct NetSnapshot {
     pub ifaces: Vec<NetInfo>,
     pub totals: NetTotals,
     /// Aggregate RX/TX rate history for the dashboard graph.
-    #[serde(skip)]
     pub rx_history: VecDeque<f32>,
-    #[serde(skip)]
     pub tx_history: VecDeque<f32>,
     /// Processes with open sockets (own + readable under yama).
     pub proc_net: Vec<ProcNet>,

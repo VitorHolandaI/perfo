@@ -734,6 +734,7 @@ mod tests {
     fn proc(pid: u32, cpu: f32, mem: u64) -> ProcessInfo {
         ProcessInfo {
             pid,
+            name: format!("p{pid}"),
             ppid: None,
             owner: None,
             is_kernel: false,

@@ -24,6 +24,10 @@
 ## Tests
 
 - Tests run with a single command: `cargo test` (54 tests, ~0.00s).
+- Every Rust change must pass the complete local quality set before commit:
+  `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D
+  warnings`, `cargo test`, `rustqual .`, `rust-doctor inspect`, `cargo audit`,
+  and `cargo deny check` when those tools are installed.
 - Quality gates (opcional): `rustqual .` (score 0-100, 7 dimensões) e
   `rust-doctor inspect` (score 0-100). Instalados via cargo install.
 - CI (Gitea Actions / GitHub Actions, `.github/workflows/`):

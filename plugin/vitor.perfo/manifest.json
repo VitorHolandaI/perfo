@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "vitor.perfo",
+  "name": "Perfo",
+  "version": "0.1.0",
+  "author": "Vitor",
+  "description": "System performance monitor",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Perfo",
+    "description": "CPU, memory and network performance",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

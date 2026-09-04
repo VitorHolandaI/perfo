@@ -16,6 +16,8 @@ const KHZ_PER_MHZ: u64 = 1000;
 #[derive(Serialize)]
 pub struct ProcessInfo {
     pub pid: u32,
+    /// Kernel process name, independent of command-line arguments.
+    pub name: String,
     pub ppid: Option<u32>,
     /// Owning process pid when this entry is a thread (None for real processes).
     pub owner: Option<u32>,
@@ -100,11 +102,15 @@ fn last_cpu_of(pid: u32) -> Option<u32> {
 }
 
 use crate::data::disk::{DiskInfo, DiskMonitor};
+use crate::data::fan::{FanMonitor, FanSnapshot};
+use crate::data::gpu::{GpuMonitor, GpuSnapshot};
 use crate::data::mem::{self, MemSnapshot};
 use crate::data::net::{NetMonitor, NetSnapshot};
 
 #[derive(Serialize)]
 pub struct CpuSnapshot {
+    pub fans: FanSnapshot,
+    pub gpu: GpuSnapshot,
     pub overall_percent: f32,
     /// % of time CPUs spent waiting on disk I/O (from /proc/stat iowait).
     pub iowait_percent: f32,
@@ -127,7 +133,6 @@ pub struct CpuSnapshot {
     /// Per-interface network rates + TCP totals.
     pub net: NetSnapshot,
     /// Overall CPU usage ring (newest last) for the CPU history graph.
-    #[serde(skip)]
     pub cpu_history: VecDeque<f32>,
     pub processes: Vec<ProcessInfo>,
 }
@@ -370,6 +375,8 @@ pub struct CpuMonitor {
     sys: System,
     components: Components,
     disks: DiskMonitor,
+    fans: FanMonitor,
+    gpu: GpuMonitor,
     net: NetMonitor,
     users_cache: HashMap<u32, String>,
     /// pid -> last-run CPU, refreshed only on full process refreshes.
@@ -441,6 +448,8 @@ impl CpuMonitor {
             sys,
             components: Components::new_with_refreshed_list(),
             disks: DiskMonitor::new(),
+            fans: FanMonitor::new(),
+            gpu: GpuMonitor::new(),
             net: NetMonitor::new(),
             users_cache: HashMap::new(),
             last_cpu: HashMap::new(),
@@ -479,6 +488,7 @@ impl CpuMonitor {
     pub fn refresh(&mut self) {
         Self::do_refresh(&mut self.sys);
         self.disks.refresh();
+        self.gpu.refresh();
         self.net.refresh();
         let now = Instant::now();
         let elapsed = self
@@ -536,6 +546,7 @@ impl CpuMonitor {
         self.sys.refresh_cpu_usage();
         self.sys.refresh_memory();
         self.components.refresh(false);
+        self.gpu.refresh();
     }
 
     pub fn snapshot(&mut self) -> CpuSnapshot {
@@ -617,6 +628,7 @@ impl CpuMonitor {
                     self.io_window.get(&pid_u).copied().unwrap_or((0, 0));
                 ProcessInfo {
                     pid: pid_u,
+                    name: p.name().to_string_lossy().into_owned(),
                     ppid: p.parent().map(|pp| pp.as_u32()),
                     owner,
                     is_kernel: pid_u == 2 || p.parent().map(|pp| pp.as_u32()) == Some(2),
@@ -636,6 +648,8 @@ impl CpuMonitor {
         processes.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
 
         CpuSnapshot {
+            fans: self.fans.snapshot(),
+            gpu: self.gpu.snapshot(),
             overall_percent,
             iowait_percent,
             per_core,

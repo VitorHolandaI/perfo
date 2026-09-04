@@ -17,6 +17,7 @@ enum Command {
     Version,
     Tui,
     CpuJson,
+    StreamJson,
     Bench {
         secs: u64,
     },
@@ -33,6 +34,7 @@ fn parse(args: &[String]) -> Command {
         Some("-h") | Some("--help") | Some("help") => Command::Help,
         Some("-V") | Some("--version") | Some("version") => Command::Version,
         Some("cpu") => Command::CpuJson,
+        Some("stream") => Command::StreamJson,
         Some("bench") => {
             let secs = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(15);
             Command::Bench { secs }
@@ -72,6 +74,7 @@ fn print_help() {
 USAGE:
   perfo                 interactive TUI (CPU focus)
   perfo cpu --json      one-shot JSON snapshot (for widgets/scripts)
+  perfo stream --json   continuous JSON snapshots (for widgets)
   perfo trace <pid> [name]
                         trace a process's syscalls (ptrace, no strace needed)
   perfo trace -- <cmd...>
@@ -116,6 +119,27 @@ pub fn run() -> ExitCode {
                 Err(e) => {
                     eprintln!("perfo: {e}");
                     ExitCode::FAILURE
+                }
+            }
+        }
+        Command::StreamJson => {
+            let mut monitor = data::cpu::CpuMonitor::new();
+            loop {
+                data::cpu::wait_sample_interval();
+                monitor.refresh();
+                let snap = monitor.snapshot();
+                match serde_json::to_string(&snap) {
+                    Ok(json) => {
+                        println!("{json}");
+                        if let Err(e) = std::io::Write::flush(&mut std::io::stdout()) {
+                            eprintln!("perfo stream: {e}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("perfo stream: {e}");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
         }

@@ -1,0 +1,163 @@
+# Perfo
+
+Perfo is a Linux system performance monitor written in Rust. It can run as an
+interactive terminal application or as the data engine behind an Omarchy
+Quickshell plugin.
+
+The Rust binary owns collection and calculations. The Omarchy files are only a
+thin presentation layer. On a machine without Omarchy, the terminal TUI and
+the JSON commands remain usable.
+
+## Features
+
+- Interactive CPU-focused TUI.
+- CPU, per-core usage, load, memory, swap, pressure, disk I/O and network data.
+- Process list with short process names and full command lines in the TUI.
+- Read-only fan RPM and temperature discovery through Linux hwmon.
+- Optional GPU data when the kernel exposes a supported interface.
+- JSON snapshots for scripts, bars and other widgets.
+- Built-in syscall tracing with `ptrace`; no `strace` dependency.
+
+## Release Scope
+
+This release intentionally uses a small set of audited Rust crates instead of
+reimplementing every terminal, system-information, and JSON primitive. The
+current direct dependencies are `crossterm`, `libc`, `ratatui`, `serde`,
+`serde_json`, and `sysinfo`.
+
+The project reads Linux procfs and sysfs directly where that gives a clear
+kernel contract. A future release may replace more of `sysinfo` and eventually
+parts of the TUI, but the current release is not presented as zero-dependency.
+Supply-chain checks and their current status are documented in
+[`docs/architecture.md`](docs/architecture.md).
+
+## Ubuntu Install
+
+The current Git remote is an internal SSH repository. This command works on an
+Ubuntu-based machine that can reach `10.66.66.11` and has SSH access:
+
+```bash
+sudo apt update && sudo apt install -y build-essential curl git && (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) && . "$HOME/.cargo/env" && git clone git@10.66.66.11:vitor/perfo.git "$HOME/src/perfo" && cargo install --locked --path "$HOME/src/perfo" --root "$HOME/.local"
+```
+
+The command installs `perfo` at `~/.local/bin/perfo`. If that directory is not
+in `PATH`, open a new shell or add it:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The repository is not public yet. After publishing it on GitHub, GitLab or
+another reachable Git server, replace the clone URL in the command with the
+public repository URL. The build and installation steps do not change.
+
+## Run In The Terminal
+
+```bash
+perfo
+```
+
+Useful non-interactive commands:
+
+```bash
+perfo --help
+perfo --version
+perfo cpu --json
+perfo stream --json
+perfo bench 15
+```
+
+`perfo cpu --json` emits one complete snapshot. `perfo stream --json` emits one
+JSON object per line and flushes after every sample, so it can be consumed by
+`jq`, a shell script or another widget:
+
+```bash
+perfo stream --json | jq '{cpu: .overall_percent, memory: .mem, fans: .fans}'
+```
+
+The TUI opens with no arguments or with `perfo tui`. Use the keyboard help
+inside the application for navigation and the available focused views.
+
+## Process Tracing
+
+Trace a command launched by Perfo:
+
+```bash
+perfo trace -- command argument
+```
+
+Trace an existing process when Linux permissions allow it:
+
+```bash
+perfo trace PID
+perfo trace PID syscall-name
+```
+
+Tracing an existing process is normally limited by the kernel Yama policy and
+process ownership. Starting the command through `perfo trace --` is the most
+portable option and does not require changing global ptrace policy.
+
+## Omarchy Plugin
+
+The plugin requires the same binary and runs:
+
+```text
+perfo stream --json
+```
+
+Install the binary first, then install the plugin files:
+
+```bash
+mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
+cp plugin/vitor.perfo/* "$HOME/.config/omarchy/plugins/vitor.perfo/"
+omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"
+omarchy plugin enable vitor.perfo --section right
+omarchy restart shell
+```
+
+Set `PERFO_BIN` before restarting the shell when the binary is somewhere else:
+
+```bash
+export PERFO_BIN="$HOME/bin/perfo"
+omarchy restart shell
+```
+
+## Data Sources
+
+Perfo reads standard Linux interfaces before using a syscall:
+
+- `/proc/stat`, `/proc/meminfo`, `/proc/net` and `/proc/<pid>` for CPU,
+  memory, network and process data.
+- `/sys/class/hwmon` for fan RPM and sensor values.
+- `/sys/class/drm` and driver sysfs files for supported GPU values.
+- `perf_event_open` for Intel GPU engine counters when available.
+
+The monitor is read-only. It does not write PWM or EC files, load kernel
+modules, install daemons or require `lm_sensors`.
+
+Unavailable hardware values remain unavailable. A real stopped fan may report
+`0 RPM`; that is different from a sensor that does not exist or cannot be read.
+
+Detailed page formulas and display behavior are documented in
+[`docs/ui-pages.md`](docs/ui-pages.md). Hardware and implementation references
+are indexed in [`docs/README.md`](docs/README.md).
+
+## Development
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Build an optimized binary without installing it:
+
+```bash
+cargo build --release
+```
+
+The output is `target/release/perfo`.
+
+## License
+
+MIT. See [`Cargo.toml`](Cargo.toml) for package metadata.
