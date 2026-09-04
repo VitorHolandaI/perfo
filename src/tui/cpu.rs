@@ -311,12 +311,26 @@ fn draw_net_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
             n.totals.tcp_established, n.totals.tcp_retrans_s
         )),
     ];
-    for iface in n.ifaces.iter().take(3) {
+    let iface_rows = area.height.saturating_sub(5) as usize;
+    for iface in n.ifaces.iter().take(iface_rows) {
         lines.push(Line::from(format!(
-            "{:<9} {} {}",
+            "{:<9} {} {:>7}/s {} {:>7}/s",
             truncate(&iface.name, 9),
+            sparkline(&iface.rx_hist, 6, None),
             short_bytes(iface.rx_bps),
+            sparkline(&iface.tx_hist, 6, None),
             short_bytes(iface.tx_bps)
+        )));
+    }
+    if !n.listening.is_empty() {
+        lines.push(Line::from(format!(
+            "portas: {}",
+            n.listening
+                .iter()
+                .take(4)
+                .map(|p| format!("{}/{}", p.port, p.proto))
+                .collect::<Vec<_>>()
+                .join(" ")
         )));
     }
     draw_summary(frame, area, "3:NET", lines, &ui.theme);
@@ -326,7 +340,7 @@ fn draw_process_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
     let lines: Vec<Line> = ui
         .rows
         .iter()
-        .take(5)
+        .take(area.height.saturating_sub(1) as usize)
         .map(|row| {
             Line::from(format!(
                 "{:>6} {:>4.1}% {}",
