@@ -8,6 +8,8 @@ The Rust binary owns collection and calculations. The Omarchy files are only a
 thin presentation layer. On a machine without Omarchy, the terminal TUI and
 the JSON commands remain usable.
 
+![Perfo terminal dashboard](docs/images/terminal-dashboard.png)
+
 ## Features
 
 - Interactive CPU-focused TUI.
