@@ -41,53 +41,27 @@ and `cargo deny check` without duplicating that work.
 
 ## Ubuntu Install
 
-The latest Linux x86_64 release can be downloaded and installed without Rust:
+The reviewed Linux x86_64 release can be downloaded and installed without Rust.
+The installer URL is bound to an immutable commit rather than the mutable
+default branch:
 
 ```bash
-set -euo pipefail
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
-release_url=https://github.com/VitorHolandaI/perfo/releases/latest/download
-mkdir -p "$HOME/.local/bin"
+installer_path="$(mktemp)"
+trap 'rm -f "$installer_path"' EXIT
 curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  "$release_url/perfo-linux-x86_64.tar.gz" -o "$tmp_dir/perfo.tar.gz"
-curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  "$release_url/perfo-linux-x86_64.sha256" -o "$tmp_dir/perfo.sha256"
-(cd "$tmp_dir" && sha256sum --check perfo.sha256)
-mapfile -t members < <(tar --list --file "$tmp_dir/perfo.tar.gz")
-[[ "${#members[@]}" -eq 1 && "${members[0]}" == "perfo" ]]
-tar --extract --gzip --file "$tmp_dir/perfo.tar.gz" --directory "$tmp_dir"
-[[ -f "$tmp_dir/perfo" && ! -L "$tmp_dir/perfo" && -x "$tmp_dir/perfo" ]]
-install --mode 0755 "$tmp_dir/perfo" "$HOME/.local/bin/perfo"
+  "https://raw.githubusercontent.com/VitorHolandaI/perfo/e26b8f3eb20544d4142bd84be6779cb0b1761e42/install.sh" \
+  --output "$installer_path"
+bash "$installer_path"
 ```
 
-The installer verifies the release checksum and installs `perfo` at
-`~/.local/bin/perfo`. If that directory is not in `PATH`, open a new shell or
-add it:
+That reviewed installer requires release `v0.1.5`, verifies the archive against
+the expected SHA-256 digest embedded in the immutable installer, validates that
+the archive contains only one regular executable named `perfo`, and installs it
+at `~/.local/bin/perfo`. It does not trust a checksum downloaded alongside the
+archive. If the install directory is not in `PATH`, open a new shell or add it:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-```
-
-To install a specific release, set `PERFO_VERSION`, for example:
-
-```bash
-set -euo pipefail
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
-PERFO_VERSION=v0.1.5
-release_url="https://github.com/VitorHolandaI/perfo/releases/download/$PERFO_VERSION"
-mkdir -p "$HOME/.local/bin"
-curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  "$release_url/perfo-linux-x86_64.tar.gz" -o "$tmp_dir/perfo.tar.gz"
-curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  "$release_url/perfo-linux-x86_64.sha256" -o "$tmp_dir/perfo.sha256"
-(cd "$tmp_dir" && sha256sum --check perfo.sha256)
-mapfile -t members < <(tar --list --file "$tmp_dir/perfo.tar.gz")
-[[ "${#members[@]}" -eq 1 && "${members[0]}" == "perfo" ]]
-tar --extract --gzip --file "$tmp_dir/perfo.tar.gz" --directory "$tmp_dir"
-[[ -f "$tmp_dir/perfo" && ! -L "$tmp_dir/perfo" && -x "$tmp_dir/perfo" ]]
-install --mode 0755 "$tmp_dir/perfo" "$HOME/.local/bin/perfo"
 ```
 
 The release workflow publishes the binary when a matching `vX.Y.Z` tag is
