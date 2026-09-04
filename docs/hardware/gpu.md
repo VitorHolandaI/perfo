@@ -27,17 +27,26 @@ available AMD fields.
 ## Intel
 
 Intel i915 and Xe do not guarantee an AMD-style device-wide
-`gpu_busy_percent` file. Some kernels expose engine busy events through a
-PMU, for example under `/sys/bus/event_source/devices/i915/events/`.
+`gpu_busy_percent` file. The DRM usage-stats interface exposes per-client
+engine time in `/proc/<pid>/fdinfo/<fd>`, for example:
 
-The current implementation probes i915 `*-busy` event definitions and uses
-`perf_event_open` only when the PMU is available. This syscall is the fallback
-for a metric that has no equivalent regular file; failure due to permissions,
-kernel configuration, or missing events leaves utilization unavailable.
+```text
+drm-driver: i915
+drm-client-id: 9
+drm-pdev: 0000:00:02.0
+drm-engine-render: 375132209868 ns
+```
 
-The implementation reports the highest engine utilization as the device
-headline. This avoids summing parallel engines into an arbitrary value above
-100% and makes a busy render or video engine visible.
+The current implementation discovers Intel i915 cards through DRM sysfs,
+reads these fdinfo records, and deduplicates duplicated file descriptors by
+`drm-client-id`. It computes the delta between samples and reports the busiest
+engine as the device headline. This avoids summing parallel engines into an
+arbitrary value above 100% and does not require `perf_event_open` or a relaxed
+`kernel.perf_event_paranoid` setting.
+
+The same engine-time model is suitable for Xe, but the current discovery path
+still accepts only the i915 driver. Memory, temperature, and power remain
+optional because their DRM and hwmon surfaces differ by device.
 
 ## NVIDIA
 

@@ -15,7 +15,7 @@ when the metric has no file equivalent. Current examples are:
 - procfs for CPU, memory, network, and process data.
 - sysfs/hwmon for fans, temperatures, and optional hardware values.
 - DRM sysfs for AMD GPU values.
-- `perf_event_open` for Intel engine PMU counters when available.
+- DRM `/proc/<pid>/fdinfo` engine times for Intel i915 utilization.
 
 This follows the project data map and the Linux interfaces documented in
 `docs/hardware/`.
@@ -92,7 +92,7 @@ enters a stricter supply-chain hardening phase.
 - Fake hwmon fixture trees covering multiple notebook shapes are not yet in
   the repository.
 - NVIDIA GPU support is not implemented.
-- GPU values are exposed in JSON but still need full presentation in every
-  panel surface.
+- GPU values are exposed in JSON and the widget GPU page; richer device memory
+  and power fields remain backend-dependent.
 - The plugin release package still needs root-level publication metadata,
   license, and preview assets.

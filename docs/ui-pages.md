@@ -257,8 +257,8 @@ build atual, antes de concluir que o hardware nao tem fan legivel.
 
 ## Dados ainda sem pagina propria
 
-- `gpu.devices` ja existe no JSON para backends suportados, mas ainda nao ha
-  uma pagina GPU no painel.
+- `gpu.devices` agora aparece na pagina GPU do painel, com uso por dispositivo e
+  memoria quando fornecida pelo backend.
 - `net.proc_net` e `net.listening` ja existem no JSON, mas ainda nao aparecem
   na pagina NET.
 - Os detalhes avancados de disco e os metadados por core tambem estao no JSON

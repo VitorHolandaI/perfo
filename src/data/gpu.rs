@@ -1,15 +1,13 @@
+use std::collections::HashSet;
 use std::fs;
-use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde::Serialize;
 
 const AMD_VENDOR_ID: &str = "0x1002";
-const PERF_FORMAT_TOTAL_TIME_ENABLED: u64 = 1;
-const PERF_FORMAT_TOTAL_TIME_RUNNING: u64 = 2;
-const PERF_EVENT_ATTR_SIZE: u32 = 64;
-// The i915 PMU rejects the all-CPUs sentinel for device-wide events.
-const PERF_MONITOR_CPU: i32 = 0;
+const INTEL_VENDOR_ID: &str = "0x8086";
+const DRM_ENGINE_COUNT: usize = 5;
 
 #[derive(Clone, Serialize)]
 pub struct GpuInfo {
@@ -67,41 +65,40 @@ impl AmdDevice {
     }
 }
 
-struct IntelPmu {
-    counters: Vec<PerfCounter>,
+struct IntelDrm {
+    pdev: String,
+    previous: Option<IntelEngineTimes>,
+    sampled_at: Option<Instant>,
     usage_percent: Option<f32>,
 }
 
-impl IntelPmu {
-    fn discover() -> Option<Self> {
-        let root = Path::new("/sys/bus/event_source/devices/i915");
-        let pmu_type = read_trimmed(&root.join("type"))?.parse::<u32>().ok()?;
-        let Ok(entries) = fs::read_dir(root.join("events")) else {
-            return None;
+impl IntelDrm {
+    fn discover() -> Vec<Self> {
+        let Ok(entries) = fs::read_dir("/sys/class/drm") else {
+            return Vec::new();
         };
-        let mut counters: Vec<PerfCounter> = entries
+        entries
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().ends_with("-busy"))
-            .filter_map(|entry| {
-                let config = event_config(&entry.path())?;
-                PerfCounter::new(pmu_type, config, &entry.path())
-            })
-            .collect();
-        counters.sort_by(|a, b| a.name.cmp(&b.name));
-        (!counters.is_empty()).then_some(Self {
-            counters,
-            usage_percent: None,
-        })
+            .filter(|entry| is_drm_card(&entry.file_name().to_string_lossy()))
+            .filter_map(intel_device_from_entry)
+            .collect()
     }
 
     fn refresh(&mut self) {
-        let mut maximum = None;
-        for counter in &mut self.counters {
-            if let Some(percent) = counter.refresh() {
-                maximum = Some(maximum.map_or(percent, |old: f32| old.max(percent)));
-            }
-        }
-        self.usage_percent = maximum;
+        let now = Instant::now();
+        let current = read_drm_engine_times(&self.pdev);
+        self.usage_percent =
+            self.previous
+                .zip(self.sampled_at)
+                .and_then(|(previous, sampled_at)| {
+                    engine_usage_percent(
+                        previous,
+                        current,
+                        now.duration_since(sampled_at).as_secs_f32(),
+                    )
+                });
+        self.previous = Some(current);
+        self.sampled_at = Some(now);
     }
 
     fn snapshot(&self) -> GpuInfo {
@@ -117,87 +114,161 @@ impl IntelPmu {
     }
 }
 
-struct PerfCounter {
-    fd: RawFd,
-    name: String,
-    previous: Option<CounterSample>,
+#[derive(Clone, Copy, Default)]
+struct IntelEngineTimes {
+    values: [u64; DRM_ENGINE_COUNT],
+}
+
+impl IntelEngineTimes {
+    fn add_assign(&mut self, other: Self) {
+        for (total, value) in self.values.iter_mut().zip(other.values) {
+            *total = total.saturating_add(value);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
-struct CounterSample {
-    count: u64,
-    running: u64,
+struct IntelClientSample {
+    client_id: u64,
+    engines: IntelEngineTimes,
 }
 
-impl PerfCounter {
-    fn new(pmu_type: u32, config: u64, path: &Path) -> Option<Self> {
-        let attr = PerfEventAttr::new(pmu_type, config);
-        let fd = unsafe {
-            libc::syscall(
-                libc::SYS_perf_event_open,
-                &attr,
-                -1_i32,
-                PERF_MONITOR_CPU,
-                -1_i32,
-                0_u64,
-            ) as RawFd
+fn intel_device_from_entry(entry: fs::DirEntry) -> Option<IntelDrm> {
+    let device = entry.path().join("device");
+    let raw = read_trimmed(&device.join("uevent"))?;
+    if uevent_value(&raw, "DRIVER") != Some("i915") {
+        return None;
+    }
+    let pdev = uevent_value(&raw, "PCI_SLOT_NAME")?.to_owned();
+    if read_trimmed(&device.join("vendor")).as_deref() != Some(INTEL_VENDOR_ID) {
+        return None;
+    }
+    Some(IntelDrm {
+        pdev,
+        previous: None,
+        sampled_at: None,
+        usage_percent: None,
+    })
+}
+
+fn uevent_value<'a>(raw: &'a str, key: &str) -> Option<&'a str> {
+    raw.lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+}
+
+fn read_drm_engine_times(target_pdev: &str) -> IntelEngineTimes {
+    let mut totals = IntelEngineTimes::default();
+    let mut clients = HashSet::new();
+    let Ok(processes) = fs::read_dir("/proc") else {
+        return totals;
+    };
+    for process in processes.flatten() {
+        accumulate_process_engine_times(&process.path(), target_pdev, &mut clients, &mut totals);
+    }
+    totals
+}
+
+fn accumulate_process_engine_times(
+    process_path: &Path,
+    target_pdev: &str,
+    clients: &mut HashSet<u64>,
+    totals: &mut IntelEngineTimes,
+) {
+    if process_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.parse::<u32>().ok())
+        .is_none()
+    {
+        return;
+    }
+    let Ok(file_descriptors) = fs::read_dir(process_path.join("fdinfo")) else {
+        return;
+    };
+    for file_descriptor in file_descriptors.flatten() {
+        accumulate_fd_engine_times(&file_descriptor.path(), target_pdev, clients, totals);
+    }
+}
+
+fn accumulate_fd_engine_times(
+    fdinfo_path: &Path,
+    target_pdev: &str,
+    clients: &mut HashSet<u64>,
+    totals: &mut IntelEngineTimes,
+) {
+    let Ok(raw) = fs::read_to_string(fdinfo_path) else {
+        return;
+    };
+    let Some(sample) = parse_drm_fdinfo(&raw, target_pdev) else {
+        return;
+    };
+    if clients.insert(sample.client_id) {
+        totals.add_assign(sample.engines);
+    }
+}
+
+fn parse_drm_fdinfo(raw: &str, target_pdev: &str) -> Option<IntelClientSample> {
+    let mut pdev = None;
+    let mut client_id = None;
+    let mut engines = IntelEngineTimes::default();
+    for line in raw.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
         };
-        (fd >= 0).then_some(Self {
-            fd,
-            name: path.file_name()?.to_string_lossy().into_owned(),
-            previous: None,
-        })
-    }
-
-    fn refresh(&mut self) -> Option<f32> {
-        let current = read_counter(self.fd)?;
-        let previous = self.previous.replace(current)?;
-        delta_percent(previous, current)
-    }
-}
-
-impl Drop for PerfCounter {
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.fd);
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "drm-pdev" => pdev = Some(value),
+            "drm-client-id" => client_id = value.parse().ok(),
+            _ => {
+                if let Some((index, time_ns)) = drm_engine_value(key, value) {
+                    engines.values[index] = time_ns;
+                }
+            }
         }
     }
+    (pdev == Some(target_pdev)).then_some(IntelClientSample {
+        client_id: client_id?,
+        engines,
+    })
 }
 
-#[repr(C)]
-struct PerfEventAttr {
-    type_: u32,
-    size: u32,
-    config: u64,
-    sample_period: u64,
-    sample_type: u64,
-    read_format: u64,
-    flags: u64,
-    wakeup_events: u32,
-    bp_type: u32,
-    bp_addr: u64,
+fn drm_engine_value(key: &str, value: &str) -> Option<(usize, u64)> {
+    let index = match key {
+        "drm-engine-render" => 0,
+        "drm-engine-copy" => 1,
+        "drm-engine-video" => 2,
+        "drm-engine-video-enhance" => 3,
+        "drm-engine-compute" => 4,
+        _ => return None,
+    };
+    Some((index, value.strip_suffix(" ns")?.parse().ok()?))
 }
 
-impl PerfEventAttr {
-    fn new(type_: u32, config: u64) -> Self {
-        Self {
-            type_,
-            size: PERF_EVENT_ATTR_SIZE,
-            config,
-            sample_period: 0,
-            sample_type: 0,
-            read_format: PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING,
-            flags: 0,
-            wakeup_events: 0,
-            bp_type: 0,
-            bp_addr: 0,
-        }
+fn engine_usage_percent(
+    previous: IntelEngineTimes,
+    current: IntelEngineTimes,
+    elapsed_seconds: f32,
+) -> Option<f32> {
+    if elapsed_seconds <= 0.0 {
+        return None;
     }
+    let max_delta = previous
+        .values
+        .into_iter()
+        .zip(current.values)
+        .map(|(old, new)| new.saturating_sub(old))
+        .max()
+        .unwrap_or(0);
+    Some(
+        (max_delta as f64 / (elapsed_seconds as f64 * 1_000_000_000.0) * 100.0).clamp(0.0, 100.0)
+            as f32,
+    )
 }
 
 enum Backend {
     Amd(AmdDevice),
-    Intel(IntelPmu),
+    Intel(IntelDrm),
 }
 
 pub struct GpuMonitor {
@@ -216,9 +287,7 @@ impl GpuMonitor {
             .into_iter()
             .map(Backend::Amd)
             .collect();
-        if let Some(intel) = IntelPmu::discover() {
-            backends.push(Backend::Intel(intel));
-        }
+        backends.extend(IntelDrm::discover().into_iter().map(Backend::Intel));
         Self { backends }
     }
 
@@ -279,39 +348,6 @@ fn hwmon_temperature(device: &Path) -> Option<f32> {
         .max_by(|a, b| a.total_cmp(b))
 }
 
-fn event_config(path: &Path) -> Option<u64> {
-    let raw = read_trimmed(path)?;
-    parse_event_config(&raw)
-}
-
-fn parse_event_config(raw: &str) -> Option<u64> {
-    let value = raw
-        .strip_prefix("event=")
-        .or_else(|| raw.strip_prefix("config="))?;
-    u64::from_str_radix(value.trim_start_matches("0x"), 16).ok()
-}
-
-fn read_counter(fd: RawFd) -> Option<CounterSample> {
-    let mut values = [0_u64; 3];
-    let bytes = unsafe {
-        libc::read(
-            fd,
-            values.as_mut_ptr().cast(),
-            std::mem::size_of_val(&values),
-        )
-    };
-    (bytes == std::mem::size_of_val(&values) as isize).then_some(CounterSample {
-        count: values[0],
-        running: values[2],
-    })
-}
-
-fn delta_percent(previous: CounterSample, current: CounterSample) -> Option<f32> {
-    let count = current.count.checked_sub(previous.count)?;
-    let running = current.running.checked_sub(previous.running)?;
-    (running > 0).then(|| (count as f64 * 100.0 / running as f64).clamp(0.0, 100.0) as f32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,31 +368,28 @@ mod tests {
     }
 
     #[test]
-    fn event_config_reads_kernel_formats() {
-        assert_eq!(parse_event_config("event=0x1234"), Some(0x1234));
-        assert_eq!(parse_event_config("config=0x1234"), Some(0x1234));
-        assert_eq!(parse_event_config("other=0x1234"), None);
+    fn drm_fdinfo_reads_i915_engine_times() {
+        let raw = "drm-client-id: 42\ndrm-pdev: 0000:00:02.0\ndrm-engine-render: 123 ns\ndrm-engine-copy: 9 ns\ndrm-engine-capacity-video: 2\n";
+        let sample = parse_drm_fdinfo(raw, "0000:00:02.0").expect("i915 fdinfo");
+        assert_eq!(sample.client_id, 42);
+        assert_eq!(sample.engines.values, [123, 9, 0, 0, 0]);
     }
 
     #[test]
-    fn counter_delta_becomes_usage() {
-        let old = CounterSample {
-            count: 100,
-            running: 100,
-        };
-        let new = CounterSample {
-            count: 150,
-            running: 200,
-        };
-        assert_eq!(delta_percent(old, new), Some(50.0));
+    fn drm_fdinfo_rejects_other_devices() {
+        let raw = "drm-client-id: 42\ndrm-pdev: 0000:00:03.0\n";
+        assert!(parse_drm_fdinfo(raw, "0000:00:02.0").is_none());
     }
 
     #[test]
-    fn perf_attribute_has_kernel_v0_size() {
-        assert_eq!(
-            std::mem::size_of::<PerfEventAttr>(),
-            PERF_EVENT_ATTR_SIZE as usize
-        );
+    fn engine_usage_uses_the_busiest_engine() {
+        let previous = IntelEngineTimes {
+            values: [100, 200, 300, 400, 500],
+        };
+        let current = IntelEngineTimes {
+            values: [200, 300, 400, 500, 600],
+        };
+        assert_eq!(engine_usage_percent(previous, current, 1.0), Some(0.00001));
     }
 
     fn read_percent_from(raw: &str) -> Option<f32> {
