@@ -160,7 +160,7 @@ fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk
 /// Trend graph: samples bucketed to `width` columns, scaled to the
 /// absolute 0-100 range. Oldest left, newest right. Right-padded when
 /// fewer samples than width (graph grows from the left).
-fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
+fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
     const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
     if samples.is_empty() {
         return " ".repeat(width);
@@ -178,11 +178,14 @@ fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
             cnt = 0;
         }
     }
+    let scale = fixed_max
+        .unwrap_or_else(|| vals.iter().copied().fold(0.0, f32::max))
+        .max(0.001);
     let line: String = vals
         .iter()
-        .map(|v| CHARS[((v / 100.0 * 8.0) as usize).min(8)])
+        .map(|v| CHARS[((v / scale * 8.0) as usize).min(8)])
         .collect();
-    if line.len() < width {
+    if vals.len() < width {
         format!("{:<width$}", line, width = width)
     } else {
         line
@@ -190,7 +193,7 @@ fn sparkline(samples: &VecDeque<f32>, width: usize) -> String {
 }
 
 /// Braille sparkline with coarser buckets (smoother trend line).
-fn sparkline_smooth(samples: &VecDeque<f32>, width: usize) -> String {
+fn sparkline_smooth(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
     const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
     if samples.is_empty() || width < 2 {
         return " ".repeat(width);
@@ -208,11 +211,14 @@ fn sparkline_smooth(samples: &VecDeque<f32>, width: usize) -> String {
             cnt = 0;
         }
     }
+    let scale = fixed_max
+        .unwrap_or_else(|| vals.iter().copied().fold(0.0, f32::max))
+        .max(0.001);
     let line: String = vals
         .iter()
-        .map(|v| CHARS[((v / 100.0 * 8.0) as usize).min(8)])
+        .map(|v| CHARS[((v / scale * 8.0) as usize).min(8)])
         .collect();
-    if line.len() < width {
+    if vals.len() < width {
         format!("{:<width$}", line, width = width)
     } else {
         line
@@ -242,11 +248,10 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         }
         draw_status(frame, status_area, ui);
     } else {
-        // Dashboard aggregates everything: CPU, memory + disks side by
-        // side, and the network table below. Numbers/Tab focus one pane
-        // fullscreen with more detail.
+        // Dashboard keeps one compact summary of every subsystem visible;
+        // `m` or the number shortcuts open a detailed view.
         let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
-        let [cpu_area, mid_area, net_area, status_area] = Layout::vertical([
+        let [cpu_area, mid_area, lower_area, status_area] = Layout::vertical([
             Constraint::Length(8 + core_lines as u16),
             Constraint::Length(7),
             Constraint::Min(0),
@@ -254,12 +259,20 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         ])
         .areas(frame.area());
         draw_cpu(frame, cpu_area, ui, true);
-        let [mem_area, disk_area] =
-            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-                .areas(mid_area);
+        let [mem_area, disk_area, io_area] = Layout::horizontal([
+            Constraint::Percentage(30),
+            Constraint::Percentage(40),
+            Constraint::Percentage(30),
+        ])
+        .areas(mid_area);
         draw_mem(frame, mem_area, ui);
         draw_disks(frame, disk_area, ui);
-        draw_net(frame, net_area, ui);
+        draw_io_summary(frame, io_area, ui);
+        let [net_area, proc_area] =
+            Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
+                .areas(lower_area);
+        draw_net_summary(frame, net_area, ui);
+        draw_process_summary(frame, proc_area, ui);
         draw_status(frame, status_area, ui);
     }
     if ui.help {
@@ -293,6 +306,70 @@ fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     draw_mem(frame, mem_area, ui);
     draw_disks(frame, disk_area, ui);
     draw_processes(frame, proc_area, ui, false);
+}
+
+fn draw_summary(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line>, theme: &Theme) {
+    let panel = block(title, false, theme);
+    frame.render_widget(panel.clone(), area);
+    frame.render_widget(Paragraph::new(lines), panel.inner(area));
+}
+
+fn draw_io_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let disks = unique_disks(&ui.snap.disks);
+    let read: u64 = disks.iter().map(|d| d.read_bps).sum();
+    let write: u64 = disks.iter().map(|d| d.write_bps).sum();
+    let lines = vec![
+        Line::from(format!("read  {:>8}/s", short_bytes(read))),
+        Line::from(format!("write {:>8}/s", short_bytes(write))),
+        Line::from(format!(
+            "fila {:.1}  busy {:.0}%",
+            ui.snap.io_pressure_some[0],
+            disks.iter().map(|d| d.io.busy_pct).sum::<f32>()
+        )),
+        Line::from(format!("discos {}", disks.len())),
+    ];
+    draw_summary(frame, area, "2:IO", lines, &ui.theme);
+}
+
+fn draw_net_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let n = &ui.snap.net;
+    let mut lines = vec![
+        Line::from(format!(
+            "rx {:>8}/s tx {:>8}/s",
+            short_bytes(n.totals.rx_bps),
+            short_bytes(n.totals.tx_bps)
+        )),
+        Line::from(format!(
+            "tcp {}  retrans {}/s",
+            n.totals.tcp_established, n.totals.tcp_retrans_s
+        )),
+    ];
+    for iface in n.ifaces.iter().take(3) {
+        lines.push(Line::from(format!(
+            "{:<9} {} {}",
+            truncate(&iface.name, 9),
+            short_bytes(iface.rx_bps),
+            short_bytes(iface.tx_bps)
+        )));
+    }
+    draw_summary(frame, area, "3:NET", lines, &ui.theme);
+}
+
+fn draw_process_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let lines: Vec<Line> = ui
+        .rows
+        .iter()
+        .take(5)
+        .map(|row| {
+            Line::from(format!(
+                "{:>6} {:>4.1}% {}",
+                row.process.pid,
+                row.process.cpu_percent,
+                truncate(&row.process.cmd, area.width.saturating_sub(15) as usize)
+            ))
+        })
+        .collect();
+    draw_summary(frame, area, "1:PROCS", lines, &ui.theme);
 }
 
 fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
@@ -361,14 +438,14 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
             Line::from(vec![
                 Span::styled("detalhe  ", Style::default().fg(ui.theme.muted)),
                 Span::styled(
-                    sparkline(&ui.snap.cpu_history, bar_w.min(100)),
+                    sparkline(&ui.snap.cpu_history, bar_w.min(100), Some(100.0)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
                 ),
             ]),
             Line::from(vec![
                 Span::styled("tendencia", Style::default().fg(ui.theme.muted)),
                 Span::styled(
-                    sparkline_smooth(&ui.snap.cpu_history, bar_w.min(100)),
+                    sparkline_smooth(&ui.snap.cpu_history, bar_w.min(100), Some(100.0)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
                 ),
             ]),
@@ -597,7 +674,7 @@ fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Full-pane disk I/O view (Tab -> IO): PSI pressure, per-disk iostat-style
+/// Full-pane disk I/O view (menu 2 -> IO): PSI pressure, per-disk iostat-style
 /// columns, then the top processes actually moving data.
 fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     let focused = ui.pane == Pane::Io;
@@ -722,7 +799,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             Span::styled(
                 format!(
                     " {:<10} {:>6}/s",
-                    sparkline(&rhist, 10),
+                    sparkline(&rhist, 10, None),
                     short_bytes(d.read_bps)
                 ),
                 Style::default().fg(ui.theme.accent),
@@ -730,8 +807,8 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             pipe("│"),
             Span::styled(
                 format!(
-                    " {:<5} {:>6}/s",
-                    sparkline(&whist, 5),
+                    " {:<10} {:>6}/s",
+                    sparkline(&whist, 10, None),
                     short_bytes(d.write_bps)
                 ),
                 Style::default().fg(ui.theme.yellow),
@@ -816,7 +893,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// Full-pane network view (Tab -> NET): per-interface rx/tx rates and
+/// Full-pane network view (menu 3 -> NET): per-interface rx/tx rates and
 /// packet/error/drop counters plus TCP retransmissions and connections.
 ///
 /// Column cells (fixed): IFACE(10) | RX/s(9) | TX/s(9) | PPS(17) |
@@ -895,7 +972,7 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             Span::styled(
                 format!(
                     "{:<10} {:>9}",
-                    sparkline(&i.rx_hist, 10),
+                    sparkline(&i.rx_hist, 10, None),
                     format!("{}/s", short_bytes(i.rx_bps))
                 ),
                 Style::default().fg(ui.theme.accent),
@@ -904,7 +981,7 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
             Span::styled(
                 format!(
                     "{:<10} {:>9}",
-                    sparkline(&i.tx_hist, 10),
+                    sparkline(&i.tx_hist, 10, None),
                     format!("{}/s", short_bytes(i.tx_bps))
                 ),
                 Style::default().fg(ui.theme.yellow),
@@ -1302,10 +1379,16 @@ mod tests {
         }
         // 6 samples into 2 buckets: [0,0,100] avg 33.3, [0,0,0] avg 0.
         // Absolute scale to 100: 33.3/100*8=2.66→⡆, 0→⡀.
-        let s = sparkline(&q, 2);
+        let s = sparkline(&q, 2, Some(100.0));
         assert_eq!(s.chars().count(), 2);
         assert_eq!(s, "⡆⡀");
-        assert_eq!(sparkline(&VecDeque::new(), 3), "   ");
+        assert_eq!(sparkline(&VecDeque::new(), 3, Some(100.0)), "   ");
+    }
+
+    #[test]
+    fn sparkline_auto_scales_rates_without_percent_saturation() {
+        let q = VecDeque::from([0.0, 842_000_000.0, 0.0]);
+        assert_eq!(sparkline(&q, 3, None), "⡀⣿⡀");
     }
 
     #[test]
