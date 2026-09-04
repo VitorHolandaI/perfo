@@ -305,7 +305,7 @@ fn draw_io_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
         Line::from(format!("read  {:>8}/s", short_bytes(read))),
         Line::from(format!("write {:>8}/s", short_bytes(write))),
         Line::from(format!(
-            "queue {:.1}  busy {:.0}%",
+            "pressure {:.1}  busy {:.0}%",
             ui.snap.io_pressure_some[0],
             disks.iter().map(|d| d.io.busy_pct).sum::<f32>()
         )),
