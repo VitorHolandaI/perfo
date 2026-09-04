@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "pluginId": "vitor.perfo",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "target": "x86_64-unknown-linux-gnu",
   "omarchyContract": 1,
-  "sourceCommit": "e0c3b79828a2c3d831ed5111010ba641b207c0ba",
-  "buildRun": "https://github.com/VitorHolandaI/perfo/actions/runs/33928753660",
+  "sourceCommit": "33b7576be38474ffe17928f10f11469254bae911",
+  "buildRun": "https://github.com/VitorHolandaI/perfo/actions/runs/33929487317",
   "files": [
     {
       "path": "BarWidget.qml",
-      "sha256": "8c1555e5067f2b5da9b09f6117297261ad67e3be4edee897635682dc02c13272",
-      "size": 3130,
+      "sha256": "c86ecb77a3f46ec81433465626d09deb4396e69773677a292b0c5277ca185bf6",
+      "size": 3462,
       "mode": "0644"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "manifest.json",
-      "sha256": "33c0f436b06e9dd67a7fb802e22b8ab4d6e35ace6661f70186696452c48f8a89",
+      "sha256": "71b44c6b82a97b2762f08062b0aeeafa4a20ebeee30168f76ae2a1997c2a40d8",
       "size": 475,
       "mode": "0644"
     },
@@ -57,7 +57,7 @@
     },
     {
       "path": "bin/perfo",
-      "sha256": "b69af8b56c7b876f9c2b84804913f0dc0fe45734bd23b4242ad2540cc1e1fed2",
+      "sha256": "0fee873eadd75c3608bef0f49224be082fef5a32e1e11a63080333ea624039a3",
       "size": 1582536,
       "mode": "0755"
     }
