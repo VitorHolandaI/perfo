@@ -302,6 +302,7 @@ impl DiskMonitor {
                 push_capped(wq, wb as f32 / elapsed.max(0.001), HISTORY_SAMPLES);
             }
         }
+        self.history.retain(|name, _| cur.contains_key(name));
         self.prev_stats = cur;
         self.last_refresh = Some(now);
         let (p10, p60, p300) = psi::some("io");

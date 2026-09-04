@@ -243,6 +243,7 @@ impl NetMonitor {
                 });
             }
         }
+        self.history.retain(|name, _| cur.contains_key(name));
         ifaces.sort_by_key(|a| std::cmp::Reverse(a.rx_bps));
         let (retrans_total, established) = tcp_stats_from(
             &std::fs::read_to_string("/proc/net/snmp").unwrap_or_default(),

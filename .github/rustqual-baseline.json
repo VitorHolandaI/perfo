@@ -1,9 +1,9 @@
 {
   "version": 2,
-  "quality_score": 0.2075509409474361,
+  "quality_score": 0.20971014492753515,
   "iosp_score": 0.9565217391304348,
   "violations": 9,
-  "total": 335,
+  "total": 336,
   "complexity_warnings": 9,
   "magic_number_warnings": 127,
   "nesting_depth_warnings": 3,
@@ -68,12 +68,12 @@
     {
       "name": "run_loop",
       "file": "src/trace/mod.rs",
-      "line": 197
+      "line": 196
     },
     {
       "name": "attach_preamble",
       "file": "src/trace/mod.rs",
-      "line": 291
+      "line": 290
     }
   ]
 }

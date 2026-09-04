@@ -58,22 +58,21 @@ fn wtermsig(s: c_int) -> c_int {
 }
 
 /// Waits for a tracee stop. Returns true when interrupted by SIGINT while
-/// blocked (caller should break the loop and detach).
-fn wait_tracee(pid: i32, status: &mut c_int) -> bool {
+/// blocked (caller should break the loop and detach), or the wait error.
+fn wait_tracee(pid: i32, status: &mut c_int) -> io::Result<bool> {
     loop {
         let r = unsafe { libc::waitpid(pid, status, libc::__WALL) };
         if r == -1 {
             let e = io::Error::last_os_error();
             if e.kind() == io::ErrorKind::Interrupted {
                 if INTERRUPTED.load(Ordering::SeqCst) {
-                    return true;
+                    return Ok(true);
                 }
                 continue;
             }
-            eprintln!("perfo trace: waitpid: {e}");
-            std::process::exit(1);
+            return Err(e);
         }
-        return false;
+        return Ok(false);
     }
 }
 
@@ -216,7 +215,7 @@ fn run_loop(pid: i32, filter: Option<&str>, emit: &mut dyn FnMut(String)) -> io:
                 std::ptr::null_mut::<libc::c_void>(),
             );
         }
-        if wait_tracee(pid, &mut status) {
+        if wait_tracee(pid, &mut status)? {
             break;
         }
 
@@ -310,7 +309,7 @@ fn attach_preamble(pid: i32) -> io::Result<()> {
         );
     }
     let mut status: c_int = 0;
-    wait_tracee(pid, &mut status);
+    wait_tracee(pid, &mut status)?;
     Ok(())
 }
 
@@ -353,7 +352,7 @@ pub fn spawn(cmd: &[String], filter: Option<&str>) -> io::Result<()> {
 
     // Child stops with SIGTRAP right after exec.
     let mut status: c_int = 0;
-    wait_tracee(pid, &mut status);
+    wait_tracee(pid, &mut status)?;
     // TRACEME doesn't take options; enable TRACESYSGOOD now so syscall stops
     // arrive as SIGTRAP|0x80 instead of plain SIGTRAP.
     unsafe {
@@ -426,5 +425,11 @@ mod tests {
     fn string_arg_index_path_syscalls() {
         assert_eq!(string_arg_index("open"), Some(0));
         assert_eq!(string_arg_index("write"), None);
+    }
+
+    #[test]
+    fn wait_tracee_returns_error_for_unknown_pid() {
+        let mut status = 0;
+        assert!(wait_tracee(i32::MAX, &mut status).is_err());
     }
 }
