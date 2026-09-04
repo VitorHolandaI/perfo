@@ -16,6 +16,7 @@ when the metric has no file equivalent. Current examples are:
 - sysfs/hwmon for fans, temperatures, and optional hardware values.
 - DRM sysfs for AMD GPU values.
 - DRM `/proc/<pid>/fdinfo` engine times for Intel i915 utilization.
+- dynamically loaded NVML for NVIDIA GPU values when the driver is available.
 
 This follows the project data map and the Linux interfaces documented in
 `docs/hardware/`.
@@ -63,8 +64,8 @@ CPU headline. The aggregate CPU value remains available for the detail view.
 
 The plugin runs unsandboxed inside the shell. It must not install packages,
 load modules, write hardware-control files, or execute user-provided command
-strings. Optional integrations such as NVIDIA tooling must be bounded and
-explicitly documented before they are added.
+strings. Optional integrations such as NVIDIA NVML must be bounded and
+explicitly documented; loading the shared library must remain optional.
 
 ## Release dependency scope
 
@@ -91,7 +92,7 @@ enters a stricter supply-chain hardening phase.
 
 - Fake hwmon fixture trees covering multiple notebook shapes are not yet in
   the repository.
-- NVIDIA GPU support is not implemented.
+- NVIDIA GPU support is optional and uses dynamically loaded NVML.
 - GPU values are exposed in JSON and the widget GPU page; richer device memory
   and power fields remain backend-dependent.
 - The plugin release package still needs root-level publication metadata,

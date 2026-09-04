@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+use super::nvidia::NvidiaBackend;
+
 const AMD_VENDOR_ID: &str = "0x1002";
 const INTEL_VENDOR_ID: &str = "0x8086";
 const DRM_ENGINE_COUNT: usize = 5;
@@ -269,6 +271,7 @@ fn engine_usage_percent(
 enum Backend {
     Amd(AmdDevice),
     Intel(IntelDrm),
+    Nvidia(NvidiaBackend),
 }
 
 pub struct GpuMonitor {
@@ -288,13 +291,18 @@ impl GpuMonitor {
             .map(Backend::Amd)
             .collect();
         backends.extend(IntelDrm::discover().into_iter().map(Backend::Intel));
+        if let Some(nvidia) = NvidiaBackend::discover() {
+            backends.push(Backend::Nvidia(nvidia));
+        }
         Self { backends }
     }
 
     pub fn refresh(&mut self) {
         for backend in &mut self.backends {
-            if let Backend::Intel(pmu) = backend {
-                pmu.refresh();
+            match backend {
+                Backend::Intel(drm) => drm.refresh(),
+                Backend::Nvidia(nvidia) => nvidia.refresh(),
+                Backend::Amd(_) => {}
             }
         }
     }
@@ -304,9 +312,10 @@ impl GpuMonitor {
             devices: self
                 .backends
                 .iter()
-                .map(|backend| match backend {
-                    Backend::Amd(device) => device.snapshot(),
-                    Backend::Intel(pmu) => pmu.snapshot(),
+                .flat_map(|backend| match backend {
+                    Backend::Amd(device) => vec![device.snapshot()],
+                    Backend::Intel(drm) => vec![drm.snapshot()],
+                    Backend::Nvidia(nvidia) => nvidia.snapshots(),
                 })
                 .collect(),
         }

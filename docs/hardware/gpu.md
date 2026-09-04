@@ -55,10 +55,12 @@ the supported driver stack. The MenuVitals reference uses optional
 `nvidia-smi`; NVML is the more direct library API for utilization, memory,
 temperature, power, and process data.
 
-`perfo` does not yet ship an NVIDIA backend. Adding one requires an explicit
-distribution decision: dynamically load NVML, add a build-time optional
-integration, or use a bounded external query. It must not make NVIDIA a hard
-runtime dependency for AMD/Intel users.
+`perfo` loads NVML dynamically from `libnvidia-ml.so.1` (falling back to
+`libnvidia-ml.so`) and does not link it at build time. The backend is enabled
+only when NVML initializes and reports at least one device, so AMD/Intel users
+do not need an NVIDIA library or command installed. Utilization, VRAM,
+temperature, and power are queried through the optional NVML entry points; a
+metric that the driver does not expose remains `null`.
 
 ## Identity and multiple GPUs
 
