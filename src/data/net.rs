@@ -120,6 +120,9 @@ pub struct NetInfo {
 pub struct NetTotals {
     pub rx_bps: u64,
     pub tx_bps: u64,
+    /// Bytes received/sent since this monitor instance started.
+    pub session_rx_bytes: u64,
+    pub session_tx_bytes: u64,
     pub tcp_retrans_s: u64,
     pub tcp_established: u64,
 }
@@ -166,6 +169,8 @@ pub struct NetMonitor {
     history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
     rx_history: VecDeque<f32>,
     tx_history: VecDeque<f32>,
+    session_rx_bytes: u64,
+    session_tx_bytes: u64,
     snapshot: NetSnapshot,
 }
 impl Default for NetMonitor {
@@ -183,6 +188,8 @@ impl NetMonitor {
             history: HashMap::new(),
             rx_history: VecDeque::new(),
             tx_history: VecDeque::new(),
+            session_rx_bytes: 0,
+            session_tx_bytes: 0,
             snapshot: NetSnapshot {
                 ifaces: Vec::new(),
                 totals: NetTotals::default(),
@@ -207,8 +214,12 @@ impl NetMonitor {
             if let Some(p) = self.prev.get(name) {
                 let d = |a: u64, b: u64| b.saturating_sub(a);
                 let (link_mbps, link_up) = link_state(name);
-                let rx_bps = rate(d(p.0, c.0), elapsed);
-                let tx_bps = rate(d(p.4, c.4), elapsed);
+                let rx_delta = d(p.0, c.0);
+                let tx_delta = d(p.4, c.4);
+                self.session_rx_bytes = self.session_rx_bytes.saturating_add(rx_delta);
+                self.session_tx_bytes = self.session_tx_bytes.saturating_add(tx_delta);
+                let rx_bps = rate(rx_delta, elapsed);
+                let tx_bps = rate(tx_delta, elapsed);
                 let (rq, tq) = self
                     .history
                     .entry(name.clone())
@@ -257,6 +268,8 @@ impl NetMonitor {
             totals: NetTotals {
                 rx_bps: total_rx,
                 tx_bps: total_tx,
+                session_rx_bytes: self.session_rx_bytes,
+                session_tx_bytes: self.session_tx_bytes,
                 tcp_retrans_s: retrans_s,
                 tcp_established: established,
             },
@@ -459,25 +472,39 @@ fn listening_ports() -> Vec<ListeningPort> {
             }
         }
     }
-    // Build result: one entry per (port, proto) pair, preferring known PID.
-    let mut by_key: HashMap<(u16, String, u32), Vec<u32>> = HashMap::new();
+    // Collapse IPv4/IPv6 duplicates into one port/protocol row.
+    let mut by_key: HashMap<(u16, String), Vec<(u32, u32)>> = HashMap::new();
     for (inode, port, proto, uid) in &sockets {
         let pid = pid_map.get(inode).copied().unwrap_or(0);
         by_key
-            .entry((*port, proto.clone(), *uid))
+            .entry((*port, base_proto(proto)))
             .or_default()
-            .push(pid);
+            .push((pid, *uid));
     }
     let mut result: Vec<ListeningPort> = by_key
         .into_iter()
-        .map(|((port, proto, uid), pids)| {
-            let best_pid = pids.into_iter().max().unwrap_or(0);
+        .map(|((port, proto), owners)| {
+            let best_pid = owners
+                .iter()
+                .map(|(pid, _)| *pid)
+                .filter(|pid| *pid != 0)
+                .max()
+                .unwrap_or(0);
+            let mut uids: Vec<u32> = owners.iter().map(|(_, uid)| *uid).collect();
+            uids.sort_unstable();
+            uids.dedup();
             let cmd = if best_pid != 0 {
                 std::fs::read_to_string(format!("/proc/{best_pid}/cmdline"))
                     .unwrap_or_default()
                     .replace('\0', " ")
             } else {
-                format!("(uid {uid})")
+                format!(
+                    "(uid {})",
+                    uids.iter()
+                        .map(u32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
             };
             ListeningPort {
                 port,
@@ -489,6 +516,10 @@ fn listening_ports() -> Vec<ListeningPort> {
         .collect();
     result.sort_by_key(|p| p.port);
     result
+}
+
+fn base_proto(proto: &str) -> String {
+    proto.strip_suffix('6').unwrap_or(proto).to_string()
 }
 
 #[cfg(test)]
@@ -549,5 +580,12 @@ mod tests {
     fn rate_zero_elapsed_is_safe() {
         assert_eq!(rate(100, 0.0), 0);
         assert_eq!(rate(100, 2.0), 50);
+    }
+
+    #[test]
+    fn base_proto_collapses_ipv6_suffix() {
+        assert_eq!(base_proto("tcp"), "tcp");
+        assert_eq!(base_proto("tcp6"), "tcp");
+        assert_eq!(base_proto("udp6"), "udp");
     }
 }

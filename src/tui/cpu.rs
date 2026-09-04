@@ -34,6 +34,8 @@ pub enum Pane {
     Cpu,
     Io,
     Net,
+    Mem,
+    Disks,
 }
 
 pub struct Row<'a> {
@@ -77,10 +79,20 @@ fn cpu_color(v: f32, theme: &Theme) -> Color {
     }
 }
 
-fn bar(value: f32, width: usize) -> String {
-    let filled = ((value / 100.0) * width as f32).round() as usize;
+pub(super) fn bar(value: f32, width: usize) -> String {
+    let filled = ((value.clamp(0.0, 100.0) / 100.0) * width as f32).round() as usize;
     let filled = filled.min(width);
-    format!("{}{}", "•".repeat(filled), "·".repeat(width - filled))
+    format!(
+        "{}{}",
+        bar_glyph(value).to_string().repeat(filled),
+        "·".repeat(width - filled)
+    )
+}
+
+pub(super) fn bar_glyph(value: f32) -> char {
+    const LEVELS: [char; 9] = ['.', ':', '-', '=', '+', '*', '#', '%', '@'];
+    let level = (value.clamp(0.0, 100.0) / 100.0 * (LEVELS.len() - 1) as f32).round() as usize;
+    LEVELS[level]
 }
 
 fn ghz(f: u64) -> String {
@@ -107,7 +119,7 @@ fn freq_color(freq: u64, max: u64, theme: &Theme) -> Color {
     }
 }
 
-fn human_bytes(bytes: u64) -> String {
+pub(super) fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -119,7 +131,7 @@ fn human_bytes(bytes: u64) -> String {
 }
 
 /// Compact size: 8.3G, 535M, 20K.
-fn short_bytes(bytes: u64) -> String {
+pub(super) fn short_bytes(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "K", "M", "G"];
     let mut value = bytes as f64;
     let mut unit = 0;
@@ -136,7 +148,7 @@ fn short_bytes(bytes: u64) -> String {
 
 /// Shorten to AT MOST `max` chars (ellipsis included), so callers can use
 /// it inside fixed-width table cells without breaking alignment.
-fn truncate(s: &str, max: usize) -> String {
+pub(super) fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
@@ -148,7 +160,9 @@ fn truncate(s: &str, max: usize) -> String {
 
 /// Disks with distinct device names, in mount order, capped at 5. btrfs
 /// subvolumes share one device and would otherwise render as duplicate bars.
-fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk::DiskInfo> {
+pub(super) fn unique_disks(
+    disks: &[crate::data::disk::DiskInfo],
+) -> Vec<&crate::data::disk::DiskInfo> {
     let mut seen = std::collections::HashSet::new();
     disks
         .iter()
@@ -160,7 +174,7 @@ fn unique_disks(disks: &[crate::data::disk::DiskInfo]) -> Vec<&crate::data::disk
 /// Trend graph: samples bucketed to `width` columns, scaled to the
 /// absolute 0-100 range. Oldest left, newest right. Right-padded when
 /// fewer samples than width (graph grows from the left).
-fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
+pub(super) fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
     const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
     if samples.is_empty() {
         return " ".repeat(width);
@@ -194,7 +208,7 @@ fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> S
 
 /// NVMe/SATA temperature color: green <55°C, yellow 55-70, red >70
 /// (drives throttle around 80°C).
-fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
+pub(super) fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
     match temp_c {
         Some(c) if c >= 70.0 => t.red,
         Some(c) if c >= 55.0 => t.yellow,
@@ -212,6 +226,8 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
             Pane::Cpu => draw_cpu_pane(frame, body, ui),
             Pane::Io => draw_io(frame, body, ui),
             Pane::Net => draw_net(frame, body, ui),
+            Pane::Mem => super::detail::draw_mem(frame, body, ui),
+            Pane::Disks => super::detail::draw_disks(frame, body, ui),
         }
         draw_status(frame, status_area, ui);
     } else {
@@ -254,8 +270,8 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
 fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
     let title = match ui.core_filter {
-        Some(c) => format!("1:CPU + PROCESSOS — core {c}"),
-        None => "1:CPU + PROCESSOS".to_string(),
+        Some(c) => format!("1:CPU + PROCESSES — core {c}"),
+        None => "1:CPU + PROCESSES".to_string(),
     };
     let outer = block(&title, true, &ui.theme);
     frame.render_widget(outer.clone(), area);
@@ -289,64 +305,17 @@ fn draw_io_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
         Line::from(format!("read  {:>8}/s", short_bytes(read))),
         Line::from(format!("write {:>8}/s", short_bytes(write))),
         Line::from(format!(
-            "fila {:.1}  busy {:.0}%",
+            "queue {:.1}  busy {:.0}%",
             ui.snap.io_pressure_some[0],
             disks.iter().map(|d| d.io.busy_pct).sum::<f32>()
         )),
-        Line::from(format!("discos {}", disks.len())),
+        Line::from(format!("disks {}", disks.len())),
     ];
     draw_summary(frame, area, "2:IO", lines, &ui.theme);
 }
 
 fn draw_net_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
-    let n = &ui.snap.net;
-    let mut lines = vec![
-        Line::from(format!(
-            "rx {:>8}/s tx {:>8}/s",
-            short_bytes(n.totals.rx_bps),
-            short_bytes(n.totals.tx_bps)
-        )),
-        Line::from(format!(
-            "tcp {}  retrans {}/s",
-            n.totals.tcp_established, n.totals.tcp_retrans_s
-        )),
-    ];
-    let iface_rows = area.height.saturating_sub(6) as usize;
-    for iface in n.ifaces.iter().take(iface_rows) {
-        lines.push(Line::from(format!(
-            "{:<9} {} {:>7}/s {} {:>7}/s",
-            truncate(&iface.name, 9),
-            sparkline(&iface.rx_hist, 6, None),
-            short_bytes(iface.rx_bps),
-            sparkline(&iface.tx_hist, 6, None),
-            short_bytes(iface.tx_bps)
-        )));
-    }
-    if !n.listening.is_empty() {
-        lines.push(Line::from(format!(
-            "portas: {}",
-            n.listening
-                .iter()
-                .take(4)
-                .map(|p| format!("{}/{}", p.port, p.proto))
-                .collect::<Vec<_>>()
-                .join(" ")
-        )));
-    }
-    let graph_width = area.width.saturating_sub(18).max(16) as usize / 2;
-    lines.push(Line::from(vec![
-        Span::styled("hist rx ", Style::default().fg(ui.theme.muted)),
-        Span::styled(
-            sparkline(&n.rx_history, graph_width, None),
-            Style::default().fg(ui.theme.accent),
-        ),
-        Span::styled(" tx ", Style::default().fg(ui.theme.muted)),
-        Span::styled(
-            sparkline(&n.tx_history, graph_width, None),
-            Style::default().fg(ui.theme.yellow),
-        ),
-    ]));
-    draw_summary(frame, area, "3:NET", lines, &ui.theme);
+    super::net_summary::draw(frame, area, ui);
 }
 
 fn draw_process_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
@@ -366,7 +335,7 @@ fn draw_process_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
     draw_summary(frame, area, "1:PROCS", lines, &ui.theme);
 }
 
-fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
+pub(super) fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
     let mut b = Block::default()
         .title(format!(" {title} "))
         .borders(Borders::ALL);
@@ -430,7 +399,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
         Paragraph::new(vec![
             overall,
             Line::from(vec![
-                Span::styled("historico geral ", Style::default().fg(ui.theme.muted)),
+                Span::styled("overall history ", Style::default().fg(ui.theme.muted)),
                 Span::styled(
                     sparkline(&ui.snap.cpu_history, bar_w.min(100), Some(100.0)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
@@ -524,8 +493,8 @@ fn draw_cores(frame: &mut Frame, area: Rect, ui: &Ui) {
 
 fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
     let focused = ui.pane == Pane::Cpu;
-    frame.render_widget(block("MEM", focused, &ui.theme), area);
-    let inner = block("MEM", focused, &ui.theme).inner(area);
+    frame.render_widget(block("4:MEM", focused, &ui.theme), area);
+    let inner = block("4:MEM", focused, &ui.theme).inner(area);
     let m = &ui.snap.mem;
     let w = inner.width as usize;
     let bar_w = w.saturating_sub(8);
@@ -538,9 +507,22 @@ fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
     let pct = m.used as f32 / m.total.max(1) as f32 * 100.0;
 
     let bar_line = Line::from(vec![
-        Span::styled("•".repeat(used_w), Style::default().fg(ui.theme.green)),
-        Span::styled("•".repeat(cache_w), Style::default().fg(ui.theme.yellow)),
-        Span::styled("•".repeat(buf_w), Style::default().fg(ui.theme.accent)),
+        Span::styled(
+            bar_glyph(pct).to_string().repeat(used_w),
+            Style::default().fg(ui.theme.green),
+        ),
+        Span::styled(
+            bar_glyph(m.cache as f32 / m.total.max(1) as f32 * 100.0)
+                .to_string()
+                .repeat(cache_w),
+            Style::default().fg(ui.theme.yellow),
+        ),
+        Span::styled(
+            bar_glyph(m.buffers as f32 / m.total.max(1) as f32 * 100.0)
+                .to_string()
+                .repeat(buf_w),
+            Style::default().fg(ui.theme.accent),
+        ),
         Span::styled("·".repeat(free_w), Style::default().fg(ui.theme.muted)),
         Span::styled(
             format!(" {:>4.0}%", pct),
@@ -564,7 +546,7 @@ fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
         Line::from(vec![
             Span::styled("swap ", Style::default().fg(ui.theme.muted)),
             Span::styled(
-                "•".repeat(swap_used_w),
+                bar_glyph(swap_pct).to_string().repeat(swap_used_w),
                 Style::default().fg(ui.theme.yellow),
             ),
             Span::styled(
@@ -618,8 +600,8 @@ fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
 }
 
 fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
-    frame.render_widget(block("Disks", false, &ui.theme), area);
-    let inner = block("Disks", false, &ui.theme).inner(area);
+    frame.render_widget(block("5:DISKS", false, &ui.theme), area);
+    let inner = block("5:DISKS", false, &ui.theme).inner(area);
     let mut lines: Vec<Line> = Vec::new();
     let w = inner.width as usize;
     // name(12) + 1 + bar + pct(18) + 2 + mount(12)
@@ -632,7 +614,7 @@ fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
         } else {
             ui.theme.green
         };
-        let filled = ((d.percent / 100.0) * bar_w as f32).round() as usize;
+        let filled = ((d.percent.clamp(0.0, 100.0) / 100.0) * bar_w as f32).round() as usize;
         let filled = filled.min(bar_w);
         let name = d.name.rsplit('/').next().unwrap_or(&d.name);
         let mount = truncate(&d.mount, 12);
@@ -641,7 +623,10 @@ fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
                 format!("{:<11} ", truncate(name, 11)),
                 Style::default().fg(ui.theme.muted),
             ),
-            Span::styled("•".repeat(filled), Style::default().fg(color)),
+            Span::styled(
+                bar_glyph(d.percent).to_string().repeat(filled),
+                Style::default().fg(color),
+            ),
             Span::styled(
                 "·".repeat(bar_w - filled),
                 Style::default().fg(ui.theme.muted),
@@ -707,25 +692,25 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             Style::default().fg(ui.theme.muted),
         ),
         pipe("│"),
-        Span::styled(" ultimo refresh", Style::default().fg(ui.theme.muted)),
+        Span::styled(" last refresh", Style::default().fg(ui.theme.muted)),
     ])];
 
     lines.push(Line::from(vec![
         pipe(&format!(" {:<9}", "DISK")),
         pipe("│"),
-        pipe(&format!("{:>6}", "r/s")),
+        pipe(&io_header("r/s", 7)),
         pipe("│"),
-        pipe(&format!("{:>7}", "r_awt ms")),
+        pipe(&io_header("r_awt ms", 8)),
         pipe("│"),
-        pipe(&format!("{:>6}", "w/s")),
+        pipe(&io_header("w/s", 7)),
         pipe("│"),
-        pipe(&format!("{:>7}", "w_awt ms")),
+        pipe(&io_header("w_awt ms", 8)),
         pipe("│"),
-        pipe(&format!("{:>5}", "fila")),
+        pipe(&io_header("queue", 6)),
         pipe("│"),
-        pipe(&format!("{:>5}", "busy")),
+        pipe(&io_header("busy", 6)),
         pipe("│"),
-        pipe(&format!("{:>4}", "temp")),
+        pipe(&io_header("temp", 5)),
         pipe("│"),
         pipe(&format!("{:>20}", "READ")),
         pipe("│"),
@@ -779,7 +764,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
             Span::styled(
                 d.temp_c
                     .map(|t| format!(" {:>3.0}°", t))
-                    .unwrap_or_else(|| "   -".into()),
+                    .unwrap_or_else(|| "    -".into()),
                 Style::default().fg(temp_color(d.temp_c, &ui.theme)),
             ),
             pipe("│"),
@@ -816,7 +801,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     if !by_rate.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "I/O ATIVO AGORA (por processo)",
+            "ACTIVE I/O (by process)",
             Style::default().fg(ui.theme.accent),
         )));
         for p in by_rate.iter().take(6) {
@@ -853,7 +838,7 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
     if !by_io.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "MAIOR I/O NA JANELA (300s) — quem martelou o disco",
+            "MOST I/O IN WINDOW (300s)",
             Style::default().fg(ui.theme.accent),
         )));
         for p in by_io.iter().take(6) {
@@ -878,6 +863,10 @@ fn draw_io(frame: &mut Frame, area: Rect, ui: &Ui) {
         }
     }
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn io_header(label: &str, width: usize) -> String {
+    format!("{label:>width$}")
 }
 
 /// Full-pane network view (menu 3 -> NET): per-interface rx/tx rates and
@@ -917,12 +906,25 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
         ),
         pipe("│"),
         Span::styled(
-            format!("{:>13}", format!("{} conexoes", totals.tcp_established)),
+            format!("{:>13}", format!("{} connections", totals.tcp_established)),
             Style::default().fg(ui.theme.fg),
         ),
         pipe("│"),
-        Span::styled(" ultimo refresh", Style::default().fg(ui.theme.muted)),
+        Span::styled(" last refresh", Style::default().fg(ui.theme.muted)),
     ])];
+    lines.push(Line::from(vec![
+        Span::styled(" SESSION ", Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            format!("RX {}", human_bytes(totals.session_rx_bytes)),
+            Style::default().fg(ui.theme.accent),
+        ),
+        Span::styled("  ", Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            format!("TX {}", human_bytes(totals.session_tx_bytes)),
+            Style::default().fg(ui.theme.yellow),
+        ),
+        Span::styled("  since monitor start", Style::default().fg(ui.theme.muted)),
+    ]));
     lines.push(Line::from(vec![
         pipe(&format!(" {:<9}", "IFACE")),
         pipe("│"),
@@ -992,7 +994,7 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
     if !ui.snap.net.proc_net.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "PROCESSOS USANDO REDE (tcp est | listen | udp)",
+            "NETWORK PROCESSES (tcp est | listen | udp)",
             Style::default().fg(ui.theme.accent),
         )));
         for p in ui.snap.net.proc_net.iter().take(8) {
@@ -1021,7 +1023,7 @@ fn draw_net(frame: &mut Frame, area: Rect, ui: &Ui) {
     if focused && !ui.snap.net.listening.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "PORTAS ABERTAS (ouvindo)",
+            "LISTENING PORTS",
             Style::default().fg(ui.theme.accent),
         )));
         for lp in ui.snap.net.listening.iter().take(20) {
@@ -1236,18 +1238,20 @@ fn draw_menu(frame: &mut Frame, area: Rect, ui: &Ui) {
         c => c,
     };
     let items: Vec<(&str, &str)> = vec![
-        ("1", "CPU + processos"),
-        ("2", "I/O (discos)"),
-        ("3", "Rede"),
-        ("Tab", "Foco: CORES / PROCESSOS"),
-        ("←↑↓→", "Navegar cores (foco CORES)"),
-        ("↑ ↓", "Selecionar processo (foco PROCESSOS)"),
-        ("Enter", "Filtrar por core"),
-        ("m / Esc", "Fechar menu"),
-        ("c", "Cmd completo"),
-        ("/", "Buscar"),
-        ("z", "Pausar"),
-        ("q", "Sair"),
+        ("1", "CPU + processes"),
+        ("2", "I/O (disks)"),
+        ("3", "Network"),
+        ("4", "Memory"),
+        ("5", "Disks"),
+        ("Tab", "Focus: CORES / PROCESSES"),
+        ("←↑↓→", "Navigate cores (CORES focus)"),
+        ("↑ ↓", "Select process (PROCESSES focus)"),
+        ("Enter", "Filter by core"),
+        ("m / Esc", "Close menu"),
+        ("c", "Full command"),
+        ("/", "Search"),
+        ("z", "Pause"),
+        ("q", "Quit"),
     ];
     let text: Vec<Line> = items
         .iter()
@@ -1260,7 +1264,7 @@ fn draw_menu(frame: &mut Frame, area: Rect, ui: &Ui) {
         })
         .collect();
     let h = items.len() as u16 + 2;
-    let w: u16 = 28;
+    let w: u16 = 30;
     let x = (area.width.saturating_sub(w)) / 2;
     let y = (area.height.saturating_sub(h)) / 2;
     let menu_area = Rect {
@@ -1313,9 +1317,24 @@ mod tests {
 
     #[test]
     fn bar_fills_and_clamps() {
-        assert_eq!(bar(50.0, 10), "•••••·····");
-        assert_eq!(bar(200.0, 4), "••••");
+        assert_eq!(bar(50.0, 10), "+++++·····");
+        assert_eq!(bar(200.0, 4), "@@@@");
         assert_eq!(bar(0.0, 4), "····");
+    }
+
+    #[test]
+    fn bar_glyph_scales_from_light_to_heavy() {
+        assert_eq!(bar_glyph(0.0), '.');
+        assert_eq!(bar_glyph(50.0), '+');
+        assert_eq!(bar_glyph(100.0), '@');
+    }
+
+    #[test]
+    fn io_header_matches_data_cell_width() {
+        assert_eq!(io_header("r/s", 7).chars().count(), 7);
+        assert_eq!(io_header("r_awt ms", 8).chars().count(), 8);
+        assert_eq!(io_header("busy", 6).chars().count(), 6);
+        assert_eq!(format!(" {:>7.1}", 1.0).chars().count(), 8);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 pub mod cpu;
+mod detail;
 mod help;
+mod net_summary;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc;
@@ -86,7 +88,7 @@ impl Default for State {
             fullscreen: false,
             paused: false,
             use_system_theme: true,
-            lang: Lang::Pt,
+            lang: Lang::En,
             help: false,
             help_page: 0,
             show_menu: false,
@@ -495,7 +497,11 @@ fn handle_normal_key(
             false
         }
         KeyCode::Char('4') => {
-            focus_pane(state, Pane::Cpu);
+            focus_pane(state, Pane::Mem);
+            false
+        }
+        KeyCode::Char('5') => {
+            focus_pane(state, Pane::Disks);
             false
         }
         KeyCode::Char('C') => toggle_theme(state, system_theme),
@@ -542,9 +548,11 @@ fn handle_normal_key(
 fn handle_menu_key(state: &mut State, code: KeyCode) {
     match code {
         KeyCode::Char('m') | KeyCode::Esc => state.show_menu = false,
-        KeyCode::Char('1') | KeyCode::Char('4') => select_menu_pane(state, Pane::Cpu),
+        KeyCode::Char('1') => select_menu_pane(state, Pane::Cpu),
         KeyCode::Char('2') => select_menu_pane(state, Pane::Io),
         KeyCode::Char('3') => select_menu_pane(state, Pane::Net),
+        KeyCode::Char('4') => select_menu_pane(state, Pane::Mem),
+        KeyCode::Char('5') => select_menu_pane(state, Pane::Disks),
         _ => {}
     }
 }
@@ -673,12 +681,18 @@ fn status_line(state: &State) -> String {
     }
     if state.kill_prompt {
         if let Some(pid) = state.selected_pid {
-            return format!("kill {pid}?  1=SIGTERM  9=SIGKILL  0=cancel");
+            return match state.lang {
+                Lang::Pt => format!("matar {pid}?  1=SIGTERM  9=SIGKILL  0=cancela"),
+                Lang::En => format!("kill {pid}?  1=SIGTERM  9=SIGKILL  0=cancel"),
+            };
         }
     }
     if state.tracing {
         if let Some(pid) = state.trace_start_pid {
-            return format!("TRACING {pid} — s/q para parar (syscalls ao vivo)");
+            return match state.lang {
+                Lang::Pt => format!("TRACE {pid} — s/q para parar (syscalls ao vivo)"),
+                Lang::En => format!("TRACING {pid} — s/q to stop (live syscalls)"),
+            };
         }
     }
     if let Some(msg) = &state.status_msg {
@@ -689,19 +703,21 @@ fn status_line(state: &State) -> String {
             if state.cores_focused {
                 "[1:CPU + PROCS | CORES] "
             } else {
-                "[1:CPU + PROCS | PROCESSOS] "
+                "[1:CPU + PROCS | PROCESSES] "
             }
         }
-        Pane::Io => "[2:IO pane] ",
-        Pane::Net => "[3:NET pane] ",
+        Pane::Io => "[2:IO] ",
+        Pane::Net => "[3:NET] ",
+        Pane::Mem => "[4:MEM] ",
+        Pane::Disks => "[5:DISKS] ",
     };
     let full = if state.fullscreen { "[FULL] " } else { "" };
     let filter = state
         .core_filter
-        .map(|c| format!(" filtro core {c} | Esc limpa |"))
+        .map(|c| format!(" core filter {c} | Esc clears |"))
         .unwrap_or_default();
     format!(
-        "{pane}{full}{}m menu | Tab alterna foco | {filter} q sair | k kill | setas navegar | Enter filtrar core | p CPU | M MEM | i inverter | c cmd | t arvore{} | H threads{} | K kernel{} | s trace | z pausa | / busca | L idioma | ? help",
+        "{pane}{full}{}m menu | Tab focus | {filter} q quit | k kill | arrows navigate | Enter filter core | p CPU | M MEM | i reverse | c cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L language | ? help",
         if state.paused { "\u{23F8} PAUSED " } else { "" },
         if state.tree { " \u{2713}" } else { "" },
         if state.show_threads { " \u{2713}" } else { "" },
@@ -854,16 +870,22 @@ mod tests {
         assert!(s.fullscreen);
         handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
         assert!(!s.fullscreen);
+        handle_key(&mut s, &[], KeyCode::Char('4'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Mem);
+        assert!(s.fullscreen);
+        handle_key(&mut s, &[], KeyCode::Char('5'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Disks);
+        assert!(s.fullscreen);
     }
 
     #[test]
     fn lang_toggles_between_pt_and_en() {
         let mut s = State::default();
-        assert_eq!(s.lang, Lang::Pt);
-        handle_key(&mut s, &[], KeyCode::Char('L'), KeyModifiers::empty(), None);
         assert_eq!(s.lang, Lang::En);
         handle_key(&mut s, &[], KeyCode::Char('L'), KeyModifiers::empty(), None);
         assert_eq!(s.lang, Lang::Pt);
+        handle_key(&mut s, &[], KeyCode::Char('L'), KeyModifiers::empty(), None);
+        assert_eq!(s.lang, Lang::En);
         assert!(s.status_msg.is_some());
     }
 
@@ -959,7 +981,7 @@ mod tests {
         s.paused = true;
         assert!(status_line(&s).contains("PAUSED"));
         s.core_filter = Some(3);
-        assert!(status_line(&s).contains("core 3"));
+        assert!(status_line(&s).contains("core filter 3"));
     }
 
     #[test]
@@ -982,6 +1004,10 @@ mod tests {
         assert_eq!(s.pane, Pane::Net);
         assert!(s.fullscreen);
         assert!(!s.show_menu);
+        handle_key(&mut s, &[], KeyCode::Char('m'), KeyModifiers::empty(), None);
+        handle_key(&mut s, &[], KeyCode::Char('4'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Mem);
+        assert!(s.fullscreen);
     }
 
     #[test]
