@@ -464,8 +464,8 @@ Panel {
           }
         }
 
-         Column {
-           id: fanPage
+Column {
+            id: fanPage
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 6
@@ -482,17 +482,20 @@ Repeater {
                 Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
             }
           }
+        }
 
-GpuPage {
-             width: parent.width
-             visible: root.page === 7
+        Column {
+          anchors.fill: parent
+          visible: root.page === 7
+          GpuPage {
+            width: parent.width
             devices: root.gpus()
             processes: root.snapshot && root.snapshot.processes ? root.snapshot.processes : []
             totalMemoryBytes: root.snapshot ? root.snapshot.total_mem_bytes : 0
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
-       }
+        }
       }
 
       Rectangle {
