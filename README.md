@@ -155,8 +155,22 @@ omarchy plugin remove vitor.perfo --yes
 ```
 
 The plugin does not require `sudo`, does not overwrite shell configuration, and
-is licensed under MIT. Its only runtime dependency is the `perfo` binary, which
-can be installed from the GitHub release or supplied through `PERFO_BIN`.
+is licensed under MIT. Its monitor runtime dependency is the `perfo` binary,
+which can be installed from the GitHub release or supplied through `PERFO_BIN`.
+
+### Plugin Dependencies
+
+- Omarchy shell with Quickshell and its standard `qs.*` modules.
+- The `perfo` Linux x86_64 binary, installed at `~/.local/bin/perfo` or
+  configured through `PERFO_BIN`.
+- Linux `/proc` and `/sys` interfaces for system and process metrics; no
+  separate `lm_sensors` package or daemon is required.
+- Optional NVIDIA driver NVML library (`libnvidia-ml.so.1` or
+  `libnvidia-ml.so`) for NVIDIA utilization, VRAM, temperature, power, and
+  process metrics. Intel and AMD support uses kernel DRM/sysfs interfaces.
+
+The Rust crates listed in `Release Scope` are build-time dependencies compiled
+into the `perfo` binary. Plugin users do not install those crates separately.
 
 For the marketplace, an optional root-level `preview.png` (also `jpg`, `jpeg`,
 `webp`, or `avif`) is used as the listing preview. Additional screenshots can
