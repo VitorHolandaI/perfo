@@ -203,6 +203,7 @@ Panel {
       Item {
         width: parent.width
         height: Style.space(260)
+        clip: root.page === 0
 
         Column {
           id: dashboardPage
@@ -251,7 +252,7 @@ Panel {
              columnSpacing: Style.space(16)
              rowSpacing: Style.space(3)
              Repeater {
-               model: root.topProcesses(8)
+               model: root.topProcesses(4)
                delegate: Row {
                  width: (dashboardProcessGrid.width - dashboardProcessGrid.columnSpacing) / 2
                  Text { width: parent.width - Style.space(52); text: root.processName(modelData.name || modelData.cmd, modelData.pid); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }

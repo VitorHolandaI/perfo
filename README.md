@@ -38,23 +38,32 @@ dependencies on pull requests.
 
 ## Ubuntu Install
 
-The public GitHub repository can be built and installed on an Ubuntu-based
-machine with this command:
+The latest Linux x86_64 release can be downloaded and installed without Rust:
 
 ```bash
-sudo apt update && sudo apt install -y build-essential curl git && (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) && . "$HOME/.cargo/env" && git clone https://github.com/VitorHolandaI/perfo.git "$HOME/src/perfo" && cargo install --locked --path "$HOME/src/perfo" --root "$HOME/.local"
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
+bash /tmp/perfo-install.sh
+rm /tmp/perfo-install.sh
 ```
 
-The command installs `perfo` at `~/.local/bin/perfo`. If that directory is not
-in `PATH`, open a new shell or add it:
+The installer verifies the release checksum and installs `perfo` at
+`~/.local/bin/perfo`. If that directory is not in `PATH`, open a new shell or
+add it:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The repository is published at
-`https://github.com/VitorHolandaI/perfo`. The build and installation steps do
-not require a separate release artifact.
+To install a specific release, set `PERFO_VERSION`, for example:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
+PERFO_VERSION=v0.1.0 bash /tmp/perfo-install.sh
+rm /tmp/perfo-install.sh
+```
+
+The release workflow publishes the binary when a `v*` tag is pushed. The
+installer currently targets Linux `x86_64`.
 
 ## Run In The Terminal
 
@@ -113,6 +122,8 @@ perfo stream --json
 Install the binary first, then install the plugin files:
 
 ```bash
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
+bash /tmp/perfo-install.sh
 mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
 cp plugin/vitor.perfo/* "$HOME/.config/omarchy/plugins/vitor.perfo/"
 omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"

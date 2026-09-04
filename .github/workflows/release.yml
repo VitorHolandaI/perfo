@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-x86-64:
+    name: Linux x86_64 binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package binary
+        run: |
+          tar --create --gzip --file perfo-linux-x86_64.tar.gz --directory target/release perfo
+          sha256sum perfo-linux-x86_64.tar.gz > perfo-linux-x86_64.sha256
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            perfo-linux-x86_64.tar.gz \
+            perfo-linux-x86_64.sha256 \
+            --title "Perfo $GITHUB_REF_NAME" \
+            --generate-notes

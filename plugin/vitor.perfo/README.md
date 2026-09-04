@@ -10,10 +10,18 @@ The plugin runs `perfo stream --json`. Install the release binary in
 `~/.local/bin/perfo`, or set `PERFO_BIN` to an executable path before starting
 the Omarchy shell.
 
+The latest Linux x86_64 binary can be installed without Rust:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
+bash /tmp/perfo-install.sh
+rm /tmp/perfo-install.sh
+```
+
 ## Local Installation
 
 ```bash
-cargo install --path . --root "$HOME/.local" --force
+cargo install --locked --path . --root "$HOME/.local" --force
 mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
 cp plugin/vitor.perfo/* "$HOME/.config/omarchy/plugins/vitor.perfo/"
 omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"

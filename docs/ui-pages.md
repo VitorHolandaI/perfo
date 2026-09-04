@@ -55,7 +55,7 @@ Objetivo: uma leitura rapida do estado geral da maquina.
 ### Fans e processos
 
 - `FANS N` mostra quantos fans foram encontrados em `hwmon`.
-- `TOP PROCESSES` mostra ate oito processos em duas colunas, ordenados por
+- `TOP PROCESSES` mostra ate quatro processos em duas colunas, ordenados por
   `cpu_percent` decrescente.
 - O nome visual usa o campo curto `name` de `/proc`, e o percentual vem da
   variacao de CPU do processo entre refreshes.
