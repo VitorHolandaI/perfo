@@ -60,6 +60,8 @@ struct State {
     help: bool,
     help_page: usize,
     show_menu: bool,
+    /// Which section receives arrow-key navigation in the unified CPU view.
+    cores_focused: bool,
     tracing: bool,
     trace_start_pid: Option<u32>,
 }
@@ -88,6 +90,7 @@ impl Default for State {
             help: false,
             help_page: 0,
             show_menu: false,
+            cores_focused: true,
             tracing: false,
             trace_start_pid: None,
         }
@@ -178,6 +181,7 @@ fn run_loop(
                 help: state.help,
                 help_page: state.help_page,
                 show_menu: state.show_menu,
+                cores_focused: state.cores_focused,
                 lang: state.lang,
                 tracing: state.tracing || trace_thread.is_some(),
                 trace_lines: if state.tracing || trace_thread.is_some() {
@@ -336,6 +340,10 @@ fn handle_key(
         handle_help_key(state, code);
         return false;
     }
+    if state.show_menu {
+        handle_menu_key(state, code);
+        return false;
+    }
     if state.tracing {
         handle_tracing_key(state, code);
         return false;
@@ -434,12 +442,9 @@ fn handle_normal_key(
             }
         }
         KeyCode::Tab | KeyCode::BackTab => {
-            state.pane = match state.pane {
-                Pane::Cpu => Pane::Io,
-                Pane::Io => Pane::Net,
-                Pane::Net => Pane::Cpu,
-            };
-            state.fullscreen = true;
+            if state.pane == Pane::Cpu {
+                state.cores_focused = !state.cores_focused;
+            }
             false
         }
         KeyCode::Char('k') => {
@@ -519,14 +524,35 @@ fn handle_normal_key(
         | KeyCode::Home
         | KeyCode::End => handle_nav_key(state, display_pids, code),
         KeyCode::Left | KeyCode::Right => {
-            if state.pane == Pane::Cpu {
+            if state.pane == Pane::Cpu && state.cores_focused {
                 move_core(state, code);
             }
             false
         }
-        KeyCode::Enter | KeyCode::Char(' ') => toggle_core_filter(state),
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            if state.cores_focused {
+                toggle_core_filter(state);
+            }
+            false
+        }
         _ => false,
     }
+}
+
+fn handle_menu_key(state: &mut State, code: KeyCode) {
+    match code {
+        KeyCode::Char('m') | KeyCode::Esc => state.show_menu = false,
+        KeyCode::Char('1') | KeyCode::Char('4') => select_menu_pane(state, Pane::Cpu),
+        KeyCode::Char('2') => select_menu_pane(state, Pane::Io),
+        KeyCode::Char('3') => select_menu_pane(state, Pane::Net),
+        _ => {}
+    }
+}
+
+fn select_menu_pane(state: &mut State, pane: Pane) {
+    state.pane = pane;
+    state.fullscreen = true;
+    state.show_menu = false;
 }
 
 /// Expand `target` fullscreen, or drop back to the dashboard when the same
@@ -585,29 +611,23 @@ fn toggle_core_filter(state: &mut State) -> bool {
 }
 
 fn handle_nav_key(state: &mut State, display_pids: &[u32], code: KeyCode) -> bool {
-    if state.pane == Pane::Cpu {
-        match code {
-            KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::PageUp
-            | KeyCode::PageDown
-            | KeyCode::Home
-            | KeyCode::End => {
-                let delta = match code {
-                    KeyCode::Up => -1,
-                    KeyCode::Down => 1,
-                    KeyCode::PageUp => -PAGE_STEP,
-                    KeyCode::PageDown => PAGE_STEP,
-                    KeyCode::Home => i32::MIN,
-                    KeyCode::End => i32::MAX,
-                    _ => 0,
-                };
-                move_selection(state, display_pids, delta);
-            }
-            KeyCode::Left | KeyCode::Right => move_core(state, code),
-            _ => {}
-        }
+    if state.pane != Pane::Cpu {
+        return false;
     }
+    if state.cores_focused {
+        move_core(state, code);
+        return false;
+    }
+    let delta = match code {
+        KeyCode::Up => -1,
+        KeyCode::Down => 1,
+        KeyCode::PageUp => -PAGE_STEP,
+        KeyCode::PageDown => PAGE_STEP,
+        KeyCode::Home => i32::MIN,
+        KeyCode::End => i32::MAX,
+        _ => return false,
+    };
+    move_selection(state, display_pids, delta);
     false
 }
 
@@ -664,17 +684,24 @@ fn status_line(state: &State) -> String {
     if let Some(msg) = &state.status_msg {
         return msg.clone();
     }
-    if let Some(c) = state.core_filter {
-        return format!("core {c} — Enter (mesmo nucleo) ou Esc volta pra TODOS os processos");
-    }
     let pane = match state.pane {
-        Pane::Cpu => "[1:CPU pane] ",
+        Pane::Cpu => {
+            if state.cores_focused {
+                "[1:CPU + PROCS | CORES] "
+            } else {
+                "[1:CPU + PROCS | PROCESSOS] "
+            }
+        }
         Pane::Io => "[2:IO pane] ",
         Pane::Net => "[3:NET pane] ",
     };
     let full = if state.fullscreen { "[FULL] " } else { "" };
+    let filter = state
+        .core_filter
+        .map(|c| format!(" filtro core {c} | Esc limpa |"))
+        .unwrap_or_default();
     format!(
-        "{pane}{full}{}Tab panes | q quit | k kill | \u{2191}\u{2193}\u{2190}\u{2192} move | Enter core view | p/m sort | i invert | c full cmd | t tree{} | H threads{} | K kernel{} | s trace | z pause | / search | L lang | ? help",
+        "{pane}{full}{}m menu | Tab alterna foco | {filter} q sair | k kill | setas navegar | Enter filtrar core | p CPU | M MEM | i inverter | c cmd | t arvore{} | H threads{} | K kernel{} | s trace | z pausa | / busca | L idioma | ? help",
         if state.paused { "\u{23F8} PAUSED " } else { "" },
         if state.tree { " \u{2713}" } else { "" },
         if state.show_threads { " \u{2713}" } else { "" },
@@ -928,11 +955,33 @@ mod tests {
     #[test]
     fn status_line_shows_context() {
         let mut s = State::default();
-        assert!(status_line(&s).contains("[1:CPU pane]"));
+        assert!(status_line(&s).contains("[1:CPU + PROCS | CORES]"));
         s.paused = true;
         assert!(status_line(&s).contains("PAUSED"));
         s.core_filter = Some(3);
         assert!(status_line(&s).contains("core 3"));
+    }
+
+    #[test]
+    fn tab_switches_cpu_subfocus_without_changing_panel() {
+        let mut s = State::default();
+        assert!(s.cores_focused);
+        handle_key(&mut s, &[], KeyCode::Tab, KeyModifiers::empty(), None);
+        assert!(!s.cores_focused);
+        assert_eq!(s.pane, Pane::Cpu);
+        handle_key(&mut s, &[], KeyCode::Tab, KeyModifiers::empty(), None);
+        assert!(s.cores_focused);
+    }
+
+    #[test]
+    fn menu_selects_panel_and_closes() {
+        let mut s = State::default();
+        handle_key(&mut s, &[], KeyCode::Char('m'), KeyModifiers::empty(), None);
+        assert!(s.show_menu);
+        handle_key(&mut s, &[], KeyCode::Char('3'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Net);
+        assert!(s.fullscreen);
+        assert!(!s.show_menu);
     }
 
     #[test]

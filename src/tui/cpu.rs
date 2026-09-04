@@ -57,6 +57,7 @@ pub struct Ui<'a> {
     pub help: bool,
     pub help_page: usize,
     pub show_menu: bool,
+    pub cores_focused: bool,
     pub lang: crate::tui::Lang,
     pub tracing: bool,
     pub trace_lines: Option<&'a std::collections::VecDeque<String>>,
@@ -252,7 +253,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
             Constraint::Length(1),
         ])
         .areas(frame.area());
-        draw_cpu(frame, cpu_area, ui);
+        draw_cpu(frame, cpu_area, ui, true);
         let [mem_area, disk_area] =
             Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
                 .areas(mid_area);
@@ -269,22 +270,29 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
     }
 }
 
-/// Fullscreen CPU window: cores + process table + mem/disks.
+/// Fullscreen CPU window: one frame around CPU, memory, disks, and processes.
 fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
+    let title = match ui.core_filter {
+        Some(c) => format!("1:CPU + PROCESSOS — core {c}"),
+        None => "1:CPU + PROCESSOS".to_string(),
+    };
+    let outer = block(&title, true, &ui.theme);
+    frame.render_widget(outer.clone(), area);
+    let inner = outer.inner(area);
     let [cpu_area, mid_area, proc_area] = Layout::vertical([
         Constraint::Length(8 + core_lines as u16),
         Constraint::Length(7),
         Constraint::Min(0),
     ])
-    .areas(area);
-    draw_cpu(frame, cpu_area, ui);
+    .areas(inner);
+    draw_cpu(frame, cpu_area, ui, false);
     let [mem_area, disk_area] =
         Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
             .areas(mid_area);
     draw_mem(frame, mem_area, ui);
     draw_disks(frame, disk_area, ui);
-    draw_processes(frame, proc_area, ui);
+    draw_processes(frame, proc_area, ui, false);
 }
 
 fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
@@ -297,14 +305,18 @@ fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
     b
 }
 
-fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui) {
+fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
     let title = match ui.core_filter {
         Some(c) => format!("1:CPU — core {c}"),
         None => "1:CPU".to_string(),
     };
-    let focused = ui.pane == Pane::Cpu;
-    frame.render_widget(block(&title, focused, &ui.theme), area);
-    let inner = block(&title, focused, &ui.theme).inner(area);
+    let inner = if framed {
+        let panel = block(&title, ui.pane == Pane::Cpu, &ui.theme);
+        frame.render_widget(panel.clone(), area);
+        panel.inner(area)
+    } else {
+        area
+    };
     let [overall_area, cores_area] =
         Layout::vertical([Constraint::Length(8), Constraint::Min(0)]).areas(inner);
 
@@ -372,9 +384,9 @@ fn draw_cores(frame: &mut Frame, area: Rect, ui: &Ui) {
     let n = ui.snap.per_core.len().min(MAX_CORE_ROWS);
     let two_per_line = area.width >= 60;
     let bar_w = if two_per_line {
-        (area.width.saturating_sub(1) / 2).saturating_sub(25) as usize
+        (area.width.saturating_sub(1) / 2).saturating_sub(26) as usize
     } else {
-        area.width.saturating_sub(29) as usize
+        area.width.saturating_sub(30) as usize
     };
     let bar_w = bar_w.max(1);
     let mut lines: Vec<Line> = Vec::new();
@@ -393,6 +405,11 @@ fn draw_cores(frame: &mut Frame, area: Rect, ui: &Ui) {
                 .map(|t| t.letter())
                 .unwrap_or('?');
             let focused_core = i == ui.core_focus;
+            let focus_marker = if ui.cores_focused && focused_core {
+                "▶"
+            } else {
+                " "
+            };
             let mut st = Style::default();
             if focused_core {
                 st = st.bg(ui.theme.selection).add_modifier(Modifier::BOLD);
@@ -419,7 +436,7 @@ fn draw_cores(frame: &mut Frame, area: Rect, ui: &Ui) {
                 None => String::new(),
             };
             spans.push(Span::styled(
-                format!("{:>2}{} ", i, letter),
+                format!("{focus_marker}{:>2}{} ", i, letter),
                 st.fg(type_color),
             ));
             spans.push(Span::styled(
@@ -1012,7 +1029,7 @@ fn io_pressure_color(p10: f64, theme: &Theme) -> Color {
     }
 }
 
-fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
+fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
     if ui.tracing {
         draw_trace(frame, area, ui);
         return;
@@ -1023,9 +1040,13 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         (true, None) => "PROCS (tree)".to_string(),
         (false, None) => "PROCS".to_string(),
     };
-    let focused = ui.pane == Pane::Cpu;
-    frame.render_widget(block(&title, focused, &ui.theme), area);
-    let inner = block(&title, focused, &ui.theme).inner(area);
+    let inner = if framed {
+        let panel = block(&title, ui.pane == Pane::Cpu, &ui.theme);
+        frame.render_widget(panel.clone(), area);
+        panel.inner(area)
+    } else {
+        area
+    };
 
     let widths = [
         Constraint::Length(8),
@@ -1154,10 +1175,11 @@ fn draw_menu(frame: &mut Frame, area: Rect, ui: &Ui) {
         ("1", "CPU + processos"),
         ("2", "I/O (discos)"),
         ("3", "Rede"),
-        ("Tab", "Painel seguinte"),
-        ("← →", "Navegar cores"),
-        ("↑ ↓", "Selecionar processo"),
+        ("Tab", "Foco: CORES / PROCESSOS"),
+        ("←↑↓→", "Navegar cores (foco CORES)"),
+        ("↑ ↓", "Selecionar processo (foco PROCESSOS)"),
         ("Enter", "Filtrar por core"),
+        ("m / Esc", "Fechar menu"),
         ("c", "Cmd completo"),
         ("/", "Buscar"),
         ("z", "Pausar"),
