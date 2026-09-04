@@ -6,8 +6,13 @@ import qs.Ui
 BarWidget {
   id: root
   moduleName: "vitor.perfo"
+  property var manifest: null
   property var snapshot: null
-  readonly property string binaryPath: Quickshell.env("PERFO_BIN") || (Quickshell.env("HOME") + "/.local/bin/perfo")
+  readonly property string binaryPath: {
+    if (manifest && manifest.__sourceDir)
+      return String(manifest.__sourceDir) + "/bin/perfo"
+    return Quickshell.env("PERFO_BIN") || (Quickshell.env("HOME") + "/.local/bin/perfo")
+  }
 
   readonly property string cpuLabel: snapshot ? "C " + Math.round(snapshot.overall_percent) + "%" : "C --"
   readonly property string memLabel: snapshot && snapshot.total_mem_bytes > 0

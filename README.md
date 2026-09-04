@@ -39,35 +39,6 @@ workflow summary and reviews changed dependencies on pull requests. The
 dedicated [security workflow](.github/workflows/security.yml) runs `cargo audit`
 and `cargo deny check` without duplicating that work.
 
-## Ubuntu Install
-
-The reviewed Linux x86_64 release can be downloaded and installed without Rust.
-The installer URL is bound to an immutable commit rather than the mutable
-default branch:
-
-```bash
-installer_path="$(mktemp)"
-trap 'rm -f "$installer_path"' EXIT
-curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-  "https://raw.githubusercontent.com/VitorHolandaI/perfo/e26b8f3eb20544d4142bd84be6779cb0b1761e42/install.sh" \
-  --output "$installer_path"
-bash "$installer_path"
-```
-
-That reviewed installer requires release `v0.1.5`, verifies the archive against
-the expected SHA-256 digest embedded in the immutable installer, validates that
-the archive contains only one regular executable named `perfo`, and installs it
-at `~/.local/bin/perfo`. It does not trust a checksum downloaded alongside the
-archive. If the install directory is not in `PATH`, open a new shell or add it:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-The release workflow publishes the binary when a matching `vX.Y.Z` tag is
-pushed; the tag must match both package versions. The installer currently
-targets Linux `x86_64`.
-
 ## Run In The Terminal
 
 ```bash
@@ -116,25 +87,25 @@ portable option and does not require changing global ptrace policy.
 
 ## Omarchy Plugin
 
-The repository root is also the installable `vitor.perfo` Omarchy plugin. The
-plugin requires the same binary and runs:
-
-```text
-perfo stream --json
-```
-
-Install the binary first, then install the plugin from GitHub:
+The repository root is the installable `vitor.perfo` Omarchy plugin. The binary
+is compiled by GitHub Actions and committed into the repository so every release
+is self-contained:
 
 ```bash
 omarchy plugin add https://github.com/VitorHolandaI/perfo.git --enable
 ```
 
-For a manual local installation, copy the root plugin files:
+The plugin auto-detects its binary location inside the cloned plugin tree. No
+separate binary install or `PERFO_BIN` variable is needed when installed through
+`omarchy plugin add`.
+
+For local development, install the binary first, then test the plugin from the
+working tree:
 
 ```bash
+cargo build --release
 mkdir -p "$HOME/.config/omarchy/plugins/vitor.perfo"
-cp -- *.qml manifest.json "$HOME/.config/omarchy/plugins/vitor.perfo/"
-omarchy plugin validate "$HOME/.config/omarchy/plugins/vitor.perfo"
+cp -- *.qml manifest.json bin/perfo "$HOME/.config/omarchy/plugins/vitor.perfo/"
 omarchy plugin enable vitor.perfo right
 omarchy restart shell
 ```
@@ -155,13 +126,13 @@ omarchy plugin remove vitor.perfo --yes
 
 The plugin needs no elevated privileges, does not overwrite shell configuration,
 and is licensed under MIT. Its monitor runtime dependency is the `perfo` binary,
-which can be installed from the GitHub release or supplied through `PERFO_BIN`.
+which ships inside the plugin tree.
 
 ### Plugin Dependencies
 
 - Omarchy shell with Quickshell and its standard `qs.*` modules.
-- The `perfo` Linux x86_64 binary, installed at `~/.local/bin/perfo` or
-  configured through `PERFO_BIN`.
+- The `perfo` Linux x86_64 binary, embedded in the plugin tree
+  (`bin/perfo`).
 - Linux `/proc` and `/sys` interfaces for system and process metrics; no
   separate `lm_sensors` package or daemon is required.
 - Optional NVIDIA driver NVML library (`libnvidia-ml.so.1` or

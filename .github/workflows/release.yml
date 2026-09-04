@@ -2,85 +2,171 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '*.qml'
+      - 'manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  actions: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux-x86-64:
-    name: Linux x86_64 binary
+  stamp:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      !startsWith(github.event.head_commit.message, 'release:')
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          fetch-depth: 0
 
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # stable
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # stable
         with:
           toolchain: 1.98.0
 
-      - name: Validate release version
+      - name: Fetch dependencies
+        run: cargo fetch --locked
+
+      - name: Validate version consistency
+        id: version
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          set -euo pipefail
           cargo_version=$(cargo metadata --format-version 1 --no-deps --locked | jq -r '.packages[0].version')
           manifest_version=$(jq -r '.version' manifest.json)
-          test "$version" = "$cargo_version"
-          test "$version" = "$manifest_version"
+          test "$cargo_version" = "$manifest_version"
+          echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Rust gates
+        run: |
+          cargo fmt --check
+          cargo test --all-features --locked
+          cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Build release binary
         run: cargo build --release --locked
 
-      - name: Package binary
+      - name: Stamp plugin artifacts
         run: |
-          tar --create --gzip --file perfo-linux-x86_64.tar.gz --directory target/release perfo
-          sha256sum perfo-linux-x86_64.tar.gz > perfo-linux-x86_64.sha256
+          set -euo pipefail
+          mkdir -p bin
+          cp target/release/perfo bin/perfo
+          chmod 755 bin/perfo
 
-      - name: Publish release assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-assets
-          path: |
-            perfo-linux-x86_64.tar.gz
-            perfo-linux-x86_64.sha256
-          if-no-files-found: error
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          BUILD_RUN="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          VERSION="${{ steps.version.outputs.version }}"
 
-  publish:
-    name: Publish GitHub release
-    needs: linux-x86-64
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download release assets
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+          python3 -c "
+          import hashlib, json, os, stat
+          version = '$VERSION'
+          source_commit = '$SOURCE_COMMIT'
+          build_run = '$BUILD_RUN'
+
+          tracked = [
+              'BarWidget.qml', 'Panel.qml', 'ProcessGrid.qml', 'GpuPage.qml',
+              'manifest.json', 'preview.png', 'README.md', 'LICENSE',
+          ]
+          files = []
+          for path in tracked:
+              if not os.path.exists(path):
+                  continue
+              st = os.lstat(path)
+              digest = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+              files.append({
+                  'path': path,
+                  'sha256': digest,
+                  'size': st.st_size,
+                  'mode': '{:04o}'.format(stat.S_IMODE(st.st_mode)),
+              })
+          st = os.lstat('bin/perfo')
+          digest = hashlib.sha256(open('bin/perfo', 'rb').read()).hexdigest()
+          files.append({
+              'path': 'bin/perfo',
+              'sha256': digest,
+              'size': st.st_size,
+              'mode': '{:04o}'.format(stat.S_IMODE(st.st_mode)),
+          })
+
+          bundle = {
+              'schemaVersion': 1,
+              'pluginId': 'vitor.perfo',
+              'version': version,
+              'target': 'x86_64-unknown-linux-gnu',
+              'omarchyContract': 1,
+              'sourceCommit': source_commit,
+              'buildRun': build_run,
+              'files': files,
+          }
+          json.dump(bundle, open('bundle.json', 'w'), indent=2)
+          print(f'Bundle: {len(files)} files, version {version}, commit {source_commit[:12]}')
+          "
+
+      - name: Validate plugin structure
+        run: |
+          set -euo pipefail
+          test -f bin/perfo
+          test -x bin/perfo
+          test -f bundle.json
+          test -f manifest.json
+          file bin/perfo | grep -qE 'ELF 64-bit|x86-64'
+          bin/perfo --version 2>&1 | head -1
+
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@c5c8e820efb5cb8ba9f0e3d4481cfb22c2ffd8d9 # v4
         with:
-          name: release-assets
-          path: dist
-      - name: Create or update GitHub release
+          subject-path: bin/perfo
+
+      - name: Commit, tag, push, release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" \
-              dist/perfo-linux-x86_64.tar.gz \
-              dist/perfo-linux-x86_64.sha256 \
-              --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" \
-              dist/perfo-linux-x86_64.tar.gz \
-              dist/perfo-linux-x86_64.sha256 \
-              --verify-tag \
-              --title "Perfo $GITHUB_REF_NAME" \
-              --generate-notes
-          fi
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bin/perfo bundle.json
+          git commit -m "release: v${VERSION}"
+          git tag "v${VERSION}"
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"
+
+          tar --create --gzip --file "perfo-linux-x86_64.tar.gz" --directory=bin perfo
+          sha256sum "perfo-linux-x86_64.tar.gz" > "perfo-linux-x86_64.sha256"
+
+          gh release create "v${VERSION}" \
+            --title "Perfo ${VERSION}" \
+            --notes-file - <<EON
+          Perfo ${VERSION}
+
+          ## Assets
+          - \`perfo-linux-x86_64.tar.gz\` — standalone binary for terminal use
+          - \`bin/perfo\` — plugin-embedded binary (committed to repo)
+
+          ## Plugin
+          Install with: \`omarchy plugin add https://github.com/VitorHolandaI/perfo.git\`
+          EON
+
+          gh release upload "v${VERSION}" \
+            "perfo-linux-x86_64.tar.gz" \
+            "perfo-linux-x86_64.sha256" \
+            --clobber
+
+      - name: Dispatch verify-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh workflow run verify-release.yml --ref "v${VERSION}"
