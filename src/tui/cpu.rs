@@ -192,39 +192,6 @@ fn sparkline(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> S
     }
 }
 
-/// Braille sparkline with coarser buckets (smoother trend line).
-fn sparkline_smooth(samples: &VecDeque<f32>, width: usize, fixed_max: Option<f32>) -> String {
-    const CHARS: [char; 9] = ['⡀', '⡄', '⡆', '⡇', '⣇', '⣧', '⣷', '⣿', '⣿'];
-    if samples.is_empty() || width < 2 {
-        return " ".repeat(width);
-    }
-    let bucket_n = (samples.len() / width).max(2);
-    let mut vals: Vec<f32> = Vec::new();
-    let mut sum = 0.0;
-    let mut cnt = 0usize;
-    for (i, v) in samples.iter().enumerate() {
-        sum += v;
-        cnt += 1;
-        if (i + 1) % bucket_n == 0 || i == samples.len() - 1 {
-            vals.push(sum / cnt as f32);
-            sum = 0.0;
-            cnt = 0;
-        }
-    }
-    let scale = fixed_max
-        .unwrap_or_else(|| vals.iter().copied().fold(0.0, f32::max))
-        .max(0.001);
-    let line: String = vals
-        .iter()
-        .map(|v| CHARS[((v / scale * 8.0) as usize).min(8)])
-        .collect();
-    if vals.len() < width {
-        format!("{:<width$}", line, width = width)
-    } else {
-        line
-    }
-}
-
 /// NVMe/SATA temperature color: green <55°C, yellow 55-70, red >70
 /// (drives throttle around 80°C).
 fn temp_color(temp_c: Option<f32>, t: &Theme) -> Color {
@@ -252,7 +219,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         // `m` or the number shortcuts open a detailed view.
         let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
         let [cpu_area, mid_area, lower_area, status_area] = Layout::vertical([
-            Constraint::Length(8 + core_lines as u16),
+            Constraint::Length(6 + core_lines as u16),
             Constraint::Length(7),
             Constraint::Min(0),
             Constraint::Length(1),
@@ -294,7 +261,7 @@ fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(outer.clone(), area);
     let inner = outer.inner(area);
     let [cpu_area, mid_area, proc_area] = Layout::vertical([
-        Constraint::Length(8 + core_lines as u16),
+        Constraint::Length(6 + core_lines as u16),
         Constraint::Length(7),
         Constraint::Min(0),
     ])
@@ -395,7 +362,7 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
         area
     };
     let [overall_area, cores_area] =
-        Layout::vertical([Constraint::Length(8), Constraint::Min(0)]).areas(inner);
+        Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).areas(inner);
 
     let bar_w = overall_area.width.saturating_sub(26) as usize;
     let color = cpu_color(ui.snap.overall_percent, &ui.theme);
@@ -436,16 +403,9 @@ fn draw_cpu(frame: &mut Frame, area: Rect, ui: &Ui, framed: bool) {
         Paragraph::new(vec![
             overall,
             Line::from(vec![
-                Span::styled("detalhe  ", Style::default().fg(ui.theme.muted)),
+                Span::styled("historico geral ", Style::default().fg(ui.theme.muted)),
                 Span::styled(
                     sparkline(&ui.snap.cpu_history, bar_w.min(100), Some(100.0)),
-                    Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("tendencia", Style::default().fg(ui.theme.muted)),
-                Span::styled(
-                    sparkline_smooth(&ui.snap.cpu_history, bar_w.min(100), Some(100.0)),
                     Style::default().fg(cpu_color(ui.snap.overall_percent, &ui.theme)),
                 ),
             ]),
