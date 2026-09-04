@@ -40,8 +40,11 @@ jobs:
           test -f Panel.qml
       - name: QML syntax
         run: |
-          if ! command -v qmllint >/dev/null 2>&1; then
+          qmllint_bin="$(command -v qmllint || true)"
+          if [ -z "$qmllint_bin" ]; then
             sudo apt-get update
             sudo apt-get install --no-install-recommends -y qt6-declarative-dev-tools
+            qmllint_bin=/usr/lib/qt6/bin/qmllint
           fi
-          qmllint BarWidget.qml Panel.qml ProcessGrid.qml GpuPage.qml
+          test -x "$qmllint_bin"
+          "$qmllint_bin" BarWidget.qml Panel.qml ProcessGrid.qml GpuPage.qml
