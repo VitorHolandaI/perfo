@@ -128,6 +128,11 @@ pub struct NetTotals {
 pub struct NetSnapshot {
     pub ifaces: Vec<NetInfo>,
     pub totals: NetTotals,
+    /// Aggregate RX/TX rate history for the dashboard graph.
+    #[serde(skip)]
+    pub rx_history: VecDeque<f32>,
+    #[serde(skip)]
+    pub tx_history: VecDeque<f32>,
     /// Processes with open sockets (own + readable under yama).
     pub proc_net: Vec<ProcNet>,
     /// Listening ports with the serving process.
@@ -159,6 +164,8 @@ pub struct NetMonitor {
     prev_retrans: u64,
     /// Per-interface rx/tx rate rings for the sparklines.
     history: HashMap<String, (VecDeque<f32>, VecDeque<f32>)>,
+    rx_history: VecDeque<f32>,
+    tx_history: VecDeque<f32>,
     snapshot: NetSnapshot,
 }
 impl Default for NetMonitor {
@@ -174,9 +181,13 @@ impl NetMonitor {
             prev: HashMap::new(),
             prev_retrans: 0,
             history: HashMap::new(),
+            rx_history: VecDeque::new(),
+            tx_history: VecDeque::new(),
             snapshot: NetSnapshot {
                 ifaces: Vec::new(),
                 totals: NetTotals::default(),
+                rx_history: VecDeque::new(),
+                tx_history: VecDeque::new(),
                 proc_net: Vec::new(),
                 listening: Vec::new(),
             },
@@ -230,14 +241,28 @@ impl NetMonitor {
         );
         let retrans_s = rate(retrans_total.saturating_sub(self.prev_retrans), elapsed);
         self.prev_retrans = retrans_total;
+        let total_rx: u64 = ifaces.iter().map(|i| i.rx_bps).sum();
+        let total_tx: u64 = ifaces.iter().map(|i| i.tx_bps).sum();
+        push_capped(
+            &mut self.rx_history,
+            total_rx as f32,
+            super::disk::HISTORY_SAMPLES,
+        );
+        push_capped(
+            &mut self.tx_history,
+            total_tx as f32,
+            super::disk::HISTORY_SAMPLES,
+        );
         self.snapshot = NetSnapshot {
             totals: NetTotals {
-                rx_bps: ifaces.iter().map(|i| i.rx_bps).sum(),
-                tx_bps: ifaces.iter().map(|i| i.tx_bps).sum(),
+                rx_bps: total_rx,
+                tx_bps: total_tx,
                 tcp_retrans_s: retrans_s,
                 tcp_established: established,
             },
             ifaces,
+            rx_history: self.rx_history.clone(),
+            tx_history: self.tx_history.clone(),
             proc_net: proc_sockets(),
             listening: listening_ports(),
         };

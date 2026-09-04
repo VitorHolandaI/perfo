@@ -236,7 +236,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
         draw_disks(frame, disk_area, ui);
         draw_io_summary(frame, io_area, ui);
         let [net_area, proc_area] =
-            Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
+            Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
                 .areas(lower_area);
         draw_net_summary(frame, net_area, ui);
         draw_process_summary(frame, proc_area, ui);
@@ -311,7 +311,7 @@ fn draw_net_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
             n.totals.tcp_established, n.totals.tcp_retrans_s
         )),
     ];
-    let iface_rows = area.height.saturating_sub(5) as usize;
+    let iface_rows = area.height.saturating_sub(6) as usize;
     for iface in n.ifaces.iter().take(iface_rows) {
         lines.push(Line::from(format!(
             "{:<9} {} {:>7}/s {} {:>7}/s",
@@ -333,6 +333,19 @@ fn draw_net_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
                 .join(" ")
         )));
     }
+    let graph_width = area.width.saturating_sub(18).max(16) as usize / 2;
+    lines.push(Line::from(vec![
+        Span::styled("hist rx ", Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            sparkline(&n.rx_history, graph_width, None),
+            Style::default().fg(ui.theme.accent),
+        ),
+        Span::styled(" tx ", Style::default().fg(ui.theme.muted)),
+        Span::styled(
+            sparkline(&n.tx_history, graph_width, None),
+            Style::default().fg(ui.theme.yellow),
+        ),
+    ]));
     draw_summary(frame, area, "3:NET", lines, &ui.theme);
 }
 
