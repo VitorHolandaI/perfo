@@ -58,7 +58,7 @@ To install a specific release, set `PERFO_VERSION`, for example:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
-PERFO_VERSION=v0.1.0 bash /tmp/perfo-install.sh
+PERFO_VERSION=v0.1.1 bash /tmp/perfo-install.sh
 rm /tmp/perfo-install.sh
 ```
 
@@ -146,7 +146,8 @@ Perfo reads standard Linux interfaces before using a syscall:
   memory, network and process data.
 - `/sys/class/hwmon` for fan RPM and sensor values.
 - `/sys/class/drm` and driver sysfs files for supported GPU values.
-- `perf_event_open` for Intel GPU engine counters when available.
+- DRM fdinfo engine times for Intel i915 utilization.
+- dynamically loaded NVML for NVIDIA utilization, VRAM, temperature, and power.
 
 The monitor is read-only. It does not write PWM or EC files, load kernel
 modules, install daemons or require `lm_sensors`.

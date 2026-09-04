@@ -36,6 +36,7 @@ pub enum Pane {
     Net,
     Mem,
     Disks,
+    Gpu,
 }
 
 pub struct Row<'a> {
@@ -228,6 +229,7 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
             Pane::Net => draw_net(frame, body, ui),
             Pane::Mem => super::detail::draw_mem(frame, body, ui),
             Pane::Disks => super::detail::draw_disks(frame, body, ui),
+            Pane::Gpu => super::detail::draw_gpu(frame, body, ui),
         }
         draw_status(frame, status_area, ui);
     } else {
@@ -1243,6 +1245,7 @@ fn draw_menu(frame: &mut Frame, area: Rect, ui: &Ui) {
         ("3", "Network"),
         ("4", "Memory"),
         ("5", "Disks"),
+        ("6", "GPU"),
         ("Tab", "Focus: CORES / PROCESSES"),
         ("←↑↓→", "Navigate cores (CORES focus)"),
         ("↑ ↓", "Select process (PROCESSES focus)"),

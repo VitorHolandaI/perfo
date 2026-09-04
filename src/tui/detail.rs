@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::data::cpu::ProcessInfo;
+use crate::data::gpu::GpuInfo;
 use crate::theme::Theme;
 
 use super::cpu::{self, Pane, Ui};
@@ -142,6 +143,67 @@ pub(super) fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
     draw_disk_devices(frame, devices, ui);
 }
 
+pub(super) fn draw_gpu(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let panel = cpu::block("6:GPU", ui.pane == Pane::Gpu, &ui.theme);
+    frame.render_widget(panel.clone(), area);
+    let inner = panel.inner(area);
+    let mut lines = vec![Line::from(Span::styled(
+        "DEVICE                    USE   VRAM           TEMP   POWER",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    if ui.snap.gpu.devices.is_empty() {
+        lines.push(Line::from("no readable GPUs"));
+    }
+    for device in ui
+        .snap
+        .gpu
+        .devices
+        .iter()
+        .take(inner.height.saturating_sub(2) as usize)
+    {
+        lines.push(gpu_line(device, &ui.theme));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn gpu_line(device: &GpuInfo, theme: &Theme) -> Line<'static> {
+    let name = cpu::truncate(&format!("{} [{}]", device.name, device.vendor), 24);
+    Line::from(vec![
+        Span::styled(format!("{name:<25}"), Style::default().fg(theme.fg)),
+        Span::styled(
+            format!("{:>4}  ", gpu_metric(device.usage_percent, "%")),
+            Style::default().fg(theme.accent),
+        ),
+        Span::styled(
+            format!("{:<14}  ", gpu_memory(device)),
+            Style::default().fg(theme.fg),
+        ),
+        Span::styled(
+            format!("{:>5}  ", gpu_metric(device.temperature_c, "C")),
+            Style::default().fg(theme.yellow),
+        ),
+        Span::styled(
+            gpu_metric(device.power_w, "W"),
+            Style::default().fg(theme.green),
+        ),
+    ])
+}
+
+fn gpu_metric(value: Option<f32>, suffix: &str) -> String {
+    value
+        .map(|value| format!("{value:.0}{suffix}"))
+        .unwrap_or_else(|| "--".into())
+}
+
+fn gpu_memory(device: &GpuInfo) -> String {
+    match (device.memory_used_bytes, device.memory_total_bytes) {
+        (Some(used), Some(total)) => {
+            format!("{}/{}", cpu::short_bytes(used), cpu::short_bytes(total))
+        }
+        _ => "--".into(),
+    }
+}
+
 fn draw_disk_usage(frame: &mut Frame, area: Rect, ui: &Ui) {
     let mut lines = vec![Line::from(Span::styled(
         "DEVICE     MOUNT        FS       USED/TOTAL       FREE     USE",
@@ -240,5 +302,30 @@ fn disk_color(value: f32, theme: &Theme) -> Color {
         theme.yellow
     } else {
         theme.green
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpu_metric_formats_optional_values() {
+        assert_eq!(gpu_metric(Some(42.4), "%"), "42%".to_string());
+        assert_eq!(gpu_metric(None, "W"), "--".to_string());
+    }
+
+    #[test]
+    fn gpu_memory_requires_total_and_used_values() {
+        let device = GpuInfo {
+            name: "Test GPU".into(),
+            vendor: "NVIDIA".into(),
+            usage_percent: None,
+            memory_used_bytes: Some(512 * 1024 * 1024),
+            memory_total_bytes: Some(2 * 1024 * 1024 * 1024),
+            temperature_c: None,
+            power_w: None,
+        };
+        assert_eq!(gpu_memory(&device), "512M/2.0G".to_string());
     }
 }

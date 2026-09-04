@@ -84,7 +84,7 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
             &[
                 hdr("NAVEGACAO"),
                 key("m", "abre o menu de paineis"),
-                key("1-5", "abre o painel em tela cheia; repetir volta ao dashboard"),
+                key("1-6", "abre o painel em tela cheia; repetir volta ao dashboard"),
                 key("Tab", "na CPU alterna o foco entre CORES e PROCESSOS"),
                 key("←↑↓→", "com CORES focado, muda o nucleo selecionado"),
                 key("↑ ↓", "com PROCESSOS focado, seleciona um processo"),
@@ -111,7 +111,7 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
             &[
                 hdr("NAVIGATION"),
                 key("m", "open the panel menu"),
-                key("1-5", "open fullscreen; press the same number to return"),
+                key("1-6", "open fullscreen; press the same number to return"),
                 key("Tab", "in CPU, switch focus between CORES and PROCESSES"),
                 key("←↑↓→", "with CORES focused, move the selected core"),
                 key("↑ ↓", "with PROCESSES focused, select a process"),
@@ -243,6 +243,9 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
                 txt("por interface: RX/s, TX/s, pacotes/s, erros, drops e link"),
                 txt("TCP retrans = retransmissoes; conexoes = TCP estabelecidas"),
                 txt("PORTAS ABERTAS aparece somente em tela cheia"),
+                txt(""),
+                hdr("6:GPU"),
+                txt("uso, VRAM, temperatura e potencia quando o driver fornece"),
             ],
         ),
         (Lang::En, 3) => (
@@ -263,6 +266,9 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
                 txt("per interface: RX/s, TX/s, packets/s, errors, drops, and link"),
                 txt("TCP retrans = retransmissions; connections = established TCP"),
                 txt("LISTENING PORTS appears only in fullscreen"),
+                txt(""),
+                hdr("6:GPU"),
+                txt("usage, VRAM, temperature, and power when the driver provides them"),
             ],
         ),
         (Lang::Pt, 4) => (

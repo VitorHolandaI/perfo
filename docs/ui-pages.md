@@ -89,6 +89,13 @@ Objetivo: mostrar tendencia de CPU e distribuicao por processador logico.
 - `TEMP` e a maior temperatura encontrada entre componentes com label
   `Package`, `Core` ou `PECI`.
 
+### Top processes
+
+- `TOP PROCESSES` mostra ate oito processos em duas colunas, ordenados por
+  `cpu_percent` decrescente.
+- A pagina CPU mostra a lista completa do foco; o dashboard usa uma versao
+  compacta com ate quatro processos para preservar o rodape.
+
 ## 3. IO
 
 Objetivo: responder se o armazenamento esta trabalhando e se existe fila.

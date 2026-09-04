@@ -203,7 +203,7 @@ Panel {
       Item {
         width: parent.width
         height: Style.space(260)
-        clip: root.page === 0
+        clip: root.page === 0 || root.page === 1
 
         Column {
           id: dashboardPage
@@ -245,20 +245,14 @@ Panel {
            Text { text: root.snapshot ? "FANS " + root.fans().length : "FANS --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
            Text { text: root.gpus().length > 0 ? "GPU " + root.gpus()[0].vendor + " " + (root.gpus()[0].usage_percent === null ? "--" : Number(root.gpus()[0].usage_percent).toFixed(0) + "%") : "GPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
            Text { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-           Grid {
+           ProcessGrid {
              id: dashboardProcessGrid
              width: parent.width
-             columns: 2
+             processes: root.topProcesses(4)
+             foreground: root.foreground
+             fontFamily: root.fontFamily
              columnSpacing: Style.space(16)
              rowSpacing: Style.space(3)
-             Repeater {
-               model: root.topProcesses(4)
-               delegate: Row {
-                 width: (dashboardProcessGrid.width - dashboardProcessGrid.columnSpacing) / 2
-                 Text { width: parent.width - Style.space(52); text: root.processName(modelData.name || modelData.cmd, modelData.pid); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-                 Text { width: Style.space(52); text: Math.round(Number(modelData.cpu_percent) || 0) + "%"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
-               }
-             }
            }
         }
 
@@ -303,7 +297,15 @@ Panel {
              Text { width: root.metricValueWidth; text: root.snapshot ? "IOWAIT " + Number(root.snapshot.iowait_percent).toFixed(1) + "%" : "IOWAIT --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
              Text { width: root.metricValueWidth; text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "TEMP " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
           }
-          Text { text: root.snapshot ? "TOP PROCESSES " + root.processSummary(root.snapshot.processes) : "TOP PROCESSES --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; width: parent.width }
+           Text { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+           ProcessGrid {
+             width: parent.width
+             processes: root.topProcesses(8)
+             foreground: root.foreground
+             fontFamily: root.fontFamily
+             columnSpacing: Style.space(16)
+             rowSpacing: Style.space(3)
+           }
         }
 
         Column {

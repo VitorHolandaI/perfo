@@ -504,6 +504,10 @@ fn handle_normal_key(
             focus_pane(state, Pane::Disks);
             false
         }
+        KeyCode::Char('6') => {
+            focus_pane(state, Pane::Gpu);
+            false
+        }
         KeyCode::Char('C') => toggle_theme(state, system_theme),
         KeyCode::Char('L') => toggle_lang(state),
         KeyCode::Char('?') => {
@@ -553,6 +557,7 @@ fn handle_menu_key(state: &mut State, code: KeyCode) {
         KeyCode::Char('3') => select_menu_pane(state, Pane::Net),
         KeyCode::Char('4') => select_menu_pane(state, Pane::Mem),
         KeyCode::Char('5') => select_menu_pane(state, Pane::Disks),
+        KeyCode::Char('6') => select_menu_pane(state, Pane::Gpu),
         _ => {}
     }
 }
@@ -710,6 +715,7 @@ fn status_line(state: &State) -> String {
         Pane::Net => "[3:NET] ",
         Pane::Mem => "[4:MEM] ",
         Pane::Disks => "[5:DISKS] ",
+        Pane::Gpu => "[6:GPU] ",
     };
     let full = if state.fullscreen { "[FULL] " } else { "" };
     let filter = state
@@ -877,6 +883,9 @@ mod tests {
         handle_key(&mut s, &[], KeyCode::Char('5'), KeyModifiers::empty(), None);
         assert_eq!(s.pane, Pane::Disks);
         assert!(s.fullscreen);
+        handle_key(&mut s, &[], KeyCode::Char('6'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Gpu);
+        assert!(s.fullscreen);
     }
 
     #[test]
@@ -1008,6 +1017,10 @@ mod tests {
         handle_key(&mut s, &[], KeyCode::Char('m'), KeyModifiers::empty(), None);
         handle_key(&mut s, &[], KeyCode::Char('4'), KeyModifiers::empty(), None);
         assert_eq!(s.pane, Pane::Mem);
+        assert!(s.fullscreen);
+        handle_key(&mut s, &[], KeyCode::Char('m'), KeyModifiers::empty(), None);
+        handle_key(&mut s, &[], KeyCode::Char('6'), KeyModifiers::empty(), None);
+        assert_eq!(s.pane, Pane::Gpu);
         assert!(s.fullscreen);
     }
 
