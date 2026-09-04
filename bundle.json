@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "vitor.perfo",
+  "version": "0.1.6",
+  "target": "x86_64-unknown-linux-gnu",
+  "omarchyContract": 1,
+  "sourceCommit": "e0c3b79828a2c3d831ed5111010ba641b207c0ba",
+  "buildRun": "https://github.com/VitorHolandaI/perfo/actions/runs/33928753660",
+  "files": [
+    {
+      "path": "BarWidget.qml",
+      "sha256": "8c1555e5067f2b5da9b09f6117297261ad67e3be4edee897635682dc02c13272",
+      "size": 3130,
+      "mode": "0644"
+    },
+    {
+      "path": "Panel.qml",
+      "sha256": "485b733b9c1ca6fe8dee8cb387a5cea53af97199f28f4e4ad5d8b84d38f9cf39",
+      "size": 27612,
+      "mode": "0644"
+    },
+    {
+      "path": "ProcessGrid.qml",
+      "sha256": "3f437ed6e505d5caa065f54c1ab85facfc881a8e53d4c7133b88438e7c9f886e",
+      "size": 1325,
+      "mode": "0644"
+    },
+    {
+      "path": "GpuPage.qml",
+      "sha256": "6e9c5a688705dfdf020287b7461191c1cdbf1651f6d811f25e834e43655f8cb2",
+      "size": 6528,
+      "mode": "0644"
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "33c0f436b06e9dd67a7fb802e22b8ab4d6e35ace6661f70186696452c48f8a89",
+      "size": 475,
+      "mode": "0644"
+    },
+    {
+      "path": "preview.png",
+      "sha256": "4bc1bd90a6afa883398b9130f6417815b8c86de6d0b54826e56c12d08463e7f4",
+      "size": 201363,
+      "mode": "0644"
+    },
+    {
+      "path": "README.md",
+      "sha256": "6c9041e4132c2e9d19348674e2c11d6c82fe93ccc003eb464adc0f0f5e12484f",
+      "size": 6436,
+      "mode": "0644"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "b5c3eec6b468146b4f725cf77d597ea5379d594f06a0f3dc8dd99dfa36b3cb16",
+      "size": 1070,
+      "mode": "0644"
+    },
+    {
+      "path": "bin/perfo",
+      "sha256": "b69af8b56c7b876f9c2b84804913f0dc0fe45734bd23b4242ad2540cc1e1fed2",
+      "size": 1582536,
+      "mode": "0755"
+    }
+  ]
+}
