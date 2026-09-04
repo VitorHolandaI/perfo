@@ -31,6 +31,11 @@ parts of the TUI, but the current release is not presented as zero-dependency.
 Supply-chain checks and their current status are documented in
 [`docs/architecture.md`](docs/architecture.md).
 
+GitHub automation in [`.github/workflows/dependencies.yml`](.github/workflows/dependencies.yml)
+publishes the direct dependency tree and duplicate-version report in the
+workflow summary, runs `cargo audit` and `cargo deny check`, and reviews changed
+dependencies on pull requests.
+
 ## Ubuntu Install
 
 The current Git remote is an internal SSH repository. This command works on an

@@ -80,6 +80,13 @@ and `rust-doctor` when installed. The current audit reports allowed transitive
 warnings for `paste` and `lru` through `ratatui`; they are tracked rather than
 hidden.
 
+GitHub runs the dependency inventory and security checks from
+`.github/workflows/dependencies.yml`. The workflow uses the committed
+`Cargo.lock`, prints the dependency tree and duplicate versions in the job
+summary, and runs dependency review on pull requests. GitHub Actions themselves
+are third-party inputs and should be pinned to commit SHAs when the repository
+enters a stricter supply-chain hardening phase.
+
 ## Current gaps
 
 - Fake hwmon fixture trees covering multiple notebook shapes are not yet in
