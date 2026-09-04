@@ -44,6 +44,10 @@ engine as the device headline. This avoids summing parallel engines into an
 arbitrary value above 100% and does not require `perf_event_open` or a relaxed
 `kernel.perf_event_paranoid` setting.
 
+The same samples are retained by PID for the GPU process table. Intel integrated
+GPUs use shared system RAM, so per-process dedicated VRAM is unavailable and is
+shown as `--`; the process `RAM%` column still reports its system-memory share.
+
 The same engine-time model is suitable for Xe, but the current discovery path
 still accepts only the i915 driver. Memory, temperature, and power remain
 optional because their DRM and hwmon surfaces differ by device.
@@ -86,7 +90,14 @@ The snapshot contains:
         "memory_used_bytes": null,
         "memory_total_bytes": null,
         "temperature_c": null,
-        "power_w": null
+        "power_w": null,
+        "processes": [
+          {
+            "pid": 1234,
+            "gpu_percent": 12.5,
+            "memory_used_bytes": null
+          }
+        ]
       }
     ]
   }

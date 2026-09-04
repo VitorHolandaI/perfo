@@ -1,22 +1,22 @@
 {
   "version": 2,
-  "quality_score": 0.20971014492753515,
-  "iosp_score": 0.9565217391304348,
+  "quality_score": 0.2158787232624767,
+  "iosp_score": 0.958139534883721,
   "violations": 9,
-  "total": 336,
+  "total": 349,
   "complexity_warnings": 9,
-  "magic_number_warnings": 127,
+  "magic_number_warnings": 129,
   "nesting_depth_warnings": 3,
   "function_length_warnings": 15,
-  "unsafe_warnings": 16,
+  "unsafe_warnings": 18,
   "error_handling_warnings": 2,
-  "duplicate_groups": 6,
+  "duplicate_groups": 8,
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
   "boilerplate_warnings": 1,
   "srp_struct_warnings": 0,
-  "srp_module_warnings": 10,
+  "srp_module_warnings": 11,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
@@ -28,7 +28,7 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 207,
+  "total_findings": 214,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
@@ -38,7 +38,7 @@
     {
       "name": "NvmlApi::load",
       "file": "src/data/nvidia.rs",
-      "line": 52
+      "line": 86
     },
     {
       "name": "run_loop",

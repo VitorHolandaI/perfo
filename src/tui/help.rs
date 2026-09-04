@@ -246,6 +246,8 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
                 txt(""),
                 hdr("6:GPU"),
                 txt("uso, VRAM, temperatura e potencia quando o driver fornece"),
+                txt("GPU PROCESSES: GPU%, CPU%, RAM%, VRAM, usuario e comando"),
+                txt("GPU integrada usa RAM compartilhada; VRAM por processo pode ser --"),
             ],
         ),
         (Lang::En, 3) => (
@@ -269,6 +271,8 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
                 txt(""),
                 hdr("6:GPU"),
                 txt("usage, VRAM, temperature, and power when the driver provides them"),
+                txt("GPU PROCESSES: GPU%, CPU%, RAM%, VRAM, user, and command"),
+                txt("integrated GPUs use shared system RAM; per-process VRAM may be --"),
             ],
         ),
         (Lang::Pt, 4) => (

@@ -264,8 +264,11 @@ build atual, antes de concluir que o hardware nao tem fan legivel.
 
 ## Dados ainda sem pagina propria
 
-- `gpu.devices` agora aparece na pagina GPU do painel, com uso por dispositivo e
-  memoria quando fornecida pelo backend.
+- `gpu.devices` agora aparece na pagina GPU do painel, com uso por dispositivo,
+  memoria quando fornecida pelo backend e processos associados por PID.
+- A tela `6:GPU` tambem exibe CPU%, RAM%, GPU%, VRAM por processo, usuario e
+  comando; em GPU integrada a VRAM por processo pode ser `--` por usar RAM
+  compartilhada.
 - `net.proc_net` e `net.listening` ja existem no JSON, mas ainda nao aparecem
   na pagina NET.
 - Os detalhes avancados de disco e os metadados por core tambem estao no JSON

@@ -285,11 +285,15 @@ fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     ])
     .areas(inner);
     draw_cpu(frame, cpu_area, ui, false);
-    let [mem_area, disk_area] =
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .areas(mid_area);
+    let [mem_area, disk_area, gpu_area] = Layout::horizontal([
+        Constraint::Percentage(32),
+        Constraint::Percentage(43),
+        Constraint::Percentage(25),
+    ])
+    .areas(mid_area);
     draw_mem(frame, mem_area, ui);
     draw_disks(frame, disk_area, ui);
+    super::detail::draw_gpu_summary(frame, gpu_area, ui);
     draw_processes(frame, proc_area, ui, false);
 }
 

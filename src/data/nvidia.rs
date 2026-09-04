@@ -1,8 +1,11 @@
 use std::ffi::{c_char, c_uint, c_void, CStr, CString};
 
-use super::gpu::GpuInfo;
+use super::gpu::{GpuInfo, GpuProcessInfo};
 
 const NVML_SUCCESS: NvmlReturn = 0;
+const NVML_ERROR_NOT_FOUND: NvmlReturn = 6;
+const NVML_ERROR_INSUFFICIENT_SIZE: NvmlReturn = 7;
+const NVML_VALUE_NOT_AVAILABLE: u64 = u64::MAX;
 const NVML_TEMPERATURE_GPU: c_uint = 0;
 const DEVICE_NAME_SIZE: usize = 96;
 
@@ -18,6 +21,14 @@ type NvmlDeviceGetUtilizationRates =
 type NvmlDeviceGetMemoryInfo = unsafe extern "C" fn(NvmlDevice, *mut NvmlMemory) -> NvmlReturn;
 type NvmlDeviceGetTemperature = unsafe extern "C" fn(NvmlDevice, c_uint, *mut c_uint) -> NvmlReturn;
 type NvmlDeviceGetPowerUsage = unsafe extern "C" fn(NvmlDevice, *mut c_uint) -> NvmlReturn;
+type NvmlDeviceGetRunningProcesses =
+    unsafe extern "C" fn(NvmlDevice, *mut c_uint, *mut NvmlProcessInfo) -> NvmlReturn;
+type NvmlDeviceGetProcessUtilization = unsafe extern "C" fn(
+    NvmlDevice,
+    *mut NvmlProcessUtilizationSample,
+    *mut c_uint,
+    u64,
+) -> NvmlReturn;
 
 #[repr(C)]
 #[derive(Default)]
@@ -34,6 +45,26 @@ struct NvmlMemory {
     used: u64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvmlProcessInfo {
+    pid: c_uint,
+    used_gpu_memory: u64,
+    gpu_instance_id: c_uint,
+    compute_instance_id: c_uint,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvmlProcessUtilizationSample {
+    pid: c_uint,
+    time_stamp: u64,
+    sm_util: c_uint,
+    mem_util: c_uint,
+    enc_util: c_uint,
+    dec_util: c_uint,
+}
+
 struct NvmlApi {
     library: *mut c_void,
     initialized: bool,
@@ -46,6 +77,9 @@ struct NvmlApi {
     device_get_memory_info: NvmlDeviceGetMemoryInfo,
     device_get_temperature: Option<NvmlDeviceGetTemperature>,
     device_get_power_usage: Option<NvmlDeviceGetPowerUsage>,
+    device_get_compute_processes: Option<NvmlDeviceGetRunningProcesses>,
+    device_get_graphics_processes: Option<NvmlDeviceGetRunningProcesses>,
+    device_get_process_utilization: Option<NvmlDeviceGetProcessUtilization>,
 }
 
 impl NvmlApi {
@@ -78,6 +112,17 @@ impl NvmlApi {
             device_get_memory_info: load_symbol(library, "nvmlDeviceGetMemoryInfo")?,
             device_get_temperature: load_symbol(library, "nvmlDeviceGetTemperature"),
             device_get_power_usage: load_symbol(library, "nvmlDeviceGetPowerUsage"),
+            device_get_compute_processes: load_symbol(
+                library,
+                "nvmlDeviceGetComputeRunningProcesses_v3",
+            )
+            .or_else(|| load_symbol(library, "nvmlDeviceGetComputeRunningProcesses_v2")),
+            device_get_graphics_processes: load_symbol(
+                library,
+                "nvmlDeviceGetGraphicsRunningProcesses_v3",
+            )
+            .or_else(|| load_symbol(library, "nvmlDeviceGetGraphicsRunningProcesses_v2")),
+            device_get_process_utilization: load_symbol(library, "nvmlDeviceGetProcessUtilization"),
         })
     }
 
@@ -124,6 +169,8 @@ struct NvidiaDevice {
     memory_total_bytes: Option<u64>,
     temperature_c: Option<f32>,
     power_w: Option<f32>,
+    processes: Vec<GpuProcessInfo>,
+    last_process_timestamp: u64,
 }
 
 pub(crate) struct NvidiaBackend {
@@ -145,6 +192,8 @@ impl NvidiaBackend {
                 memory_total_bytes: None,
                 temperature_c: None,
                 power_w: None,
+                processes: Vec::new(),
+                last_process_timestamp: 0,
             })
             .collect::<Vec<_>>();
         (!devices.is_empty()).then_some(Self { api, devices })
@@ -188,6 +237,133 @@ fn refresh_device(api: &NvmlApi, device: &mut NvidiaDevice) {
         let result = unsafe { get_power_usage(device.handle, &mut power_mw) };
         nvml_value(result, power_watts(power_mw))
     });
+    device.processes = process_snapshots(api, device);
+}
+
+fn process_snapshots(api: &NvmlApi, device: &mut NvidiaDevice) -> Vec<GpuProcessInfo> {
+    let mut processes = running_process_memory(api, device.handle);
+    for sample in process_utilization(api, device) {
+        let entry = processes.entry(sample.pid).or_insert(GpuProcessInfo {
+            pid: sample.pid,
+            gpu_percent: None,
+            memory_used_bytes: None,
+        });
+        let usage = process_gpu_percent(sample);
+        entry.gpu_percent = Some(entry.gpu_percent.unwrap_or_default().max(usage));
+    }
+    let mut snapshots: Vec<GpuProcessInfo> = processes.into_values().collect();
+    snapshots.sort_by(|a, b| {
+        b.gpu_percent
+            .unwrap_or_default()
+            .total_cmp(&a.gpu_percent.unwrap_or_default())
+    });
+    snapshots
+}
+
+fn process_gpu_percent(sample: NvmlProcessUtilizationSample) -> f32 {
+    [
+        sample.sm_util,
+        sample.mem_util,
+        sample.enc_util,
+        sample.dec_util,
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or_default()
+    .min(100) as f32
+}
+
+fn running_process_memory(
+    api: &NvmlApi,
+    device: NvmlDevice,
+) -> std::collections::HashMap<u32, GpuProcessInfo> {
+    let mut processes = std::collections::HashMap::new();
+    for query in [
+        api.device_get_compute_processes,
+        api.device_get_graphics_processes,
+    ] {
+        for process in running_processes(query, device) {
+            let entry = processes.entry(process.pid).or_insert(GpuProcessInfo {
+                pid: process.pid,
+                gpu_percent: None,
+                memory_used_bytes: None,
+            });
+            if process.used_gpu_memory != NVML_VALUE_NOT_AVAILABLE {
+                entry.memory_used_bytes = Some(
+                    entry
+                        .memory_used_bytes
+                        .unwrap_or_default()
+                        .saturating_add(process.used_gpu_memory),
+                );
+            }
+        }
+    }
+    processes
+}
+
+fn running_processes(
+    query: Option<NvmlDeviceGetRunningProcesses>,
+    device: NvmlDevice,
+) -> Vec<NvmlProcessInfo> {
+    let Some(query) = query else {
+        return Vec::new();
+    };
+    let mut count = 0;
+    let result = unsafe { query(device, &mut count, std::ptr::null_mut()) };
+    if result != NVML_SUCCESS && result != NVML_ERROR_INSUFFICIENT_SIZE {
+        return Vec::new();
+    }
+    if count == 0 {
+        return Vec::new();
+    }
+    let mut processes = vec![NvmlProcessInfo::default(); count as usize];
+    let result = unsafe { query(device, &mut count, processes.as_mut_ptr()) };
+    if result != NVML_SUCCESS {
+        return Vec::new();
+    }
+    processes.truncate(count as usize);
+    processes
+}
+
+fn process_utilization(
+    api: &NvmlApi,
+    device: &mut NvidiaDevice,
+) -> Vec<NvmlProcessUtilizationSample> {
+    let Some(query) = api.device_get_process_utilization else {
+        return Vec::new();
+    };
+    let mut count = 0;
+    let result = unsafe {
+        query(
+            device.handle,
+            std::ptr::null_mut(),
+            &mut count,
+            device.last_process_timestamp,
+        )
+    };
+    if result == NVML_ERROR_NOT_FOUND || count == 0 {
+        return Vec::new();
+    }
+    if result != NVML_SUCCESS && result != NVML_ERROR_INSUFFICIENT_SIZE {
+        return Vec::new();
+    }
+    let mut samples = vec![NvmlProcessUtilizationSample::default(); count as usize];
+    let result = unsafe {
+        query(
+            device.handle,
+            samples.as_mut_ptr(),
+            &mut count,
+            device.last_process_timestamp,
+        )
+    };
+    if result != NVML_SUCCESS {
+        return Vec::new();
+    }
+    samples.truncate(count as usize);
+    if let Some(timestamp) = samples.iter().map(|sample| sample.time_stamp).max() {
+        device.last_process_timestamp = timestamp;
+    }
+    samples
 }
 
 fn snapshot_device(device: &NvidiaDevice) -> GpuInfo {
@@ -199,6 +375,7 @@ fn snapshot_device(device: &NvidiaDevice) -> GpuInfo {
         memory_total_bytes: device.memory_total_bytes,
         temperature_c: device.temperature_c,
         power_w: device.power_w,
+        processes: device.processes.clone(),
     }
 }
 
@@ -259,6 +436,18 @@ mod tests {
     #[test]
     fn power_is_converted_from_milliwatts() {
         assert_eq!(power_watts(75_500), 75.5);
+    }
+
+    #[test]
+    fn process_gpu_percent_uses_the_busy_engine() {
+        let sample = NvmlProcessUtilizationSample {
+            sm_util: 12,
+            mem_util: 64,
+            enc_util: 4,
+            dec_util: 2,
+            ..Default::default()
+        };
+        assert_eq!(process_gpu_percent(sample), 64.0);
     }
 
     #[test]

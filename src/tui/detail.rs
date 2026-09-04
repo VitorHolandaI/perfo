@@ -118,7 +118,7 @@ fn draw_mem_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
     ))];
     for p in processes
         .iter()
-        .take(inner.height.saturating_sub(2) as usize)
+        .take(area.height.saturating_sub(2) as usize)
     {
         let pct = p.mem_bytes as f64 / ui.snap.mem.total.max(1) as f64 * 100.0;
         lines.push(Line::from(format!(
@@ -143,10 +143,49 @@ pub(super) fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
     draw_disk_devices(frame, devices, ui);
 }
 
+pub(super) fn draw_gpu_summary(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let panel = cpu::block("6:GPU", false, &ui.theme);
+    frame.render_widget(panel.clone(), area);
+    let inner = panel.inner(area);
+    let lines = ui
+        .snap
+        .gpu
+        .devices
+        .iter()
+        .take(inner.height.saturating_sub(1) as usize)
+        .map(|device| {
+            let vram = if device.vendor == "Intel" {
+                "shared".into()
+            } else {
+                gpu_memory(device)
+            };
+            Line::from(format!(
+                "{} {:>4} VRAM {}",
+                cpu::truncate(&device.name, 10),
+                gpu_metric(device.usage_percent, "%"),
+                vram
+            ))
+        })
+        .collect::<Vec<_>>();
+    let lines = if lines.is_empty() {
+        vec![Line::from("no readable GPUs")]
+    } else {
+        lines
+    };
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 pub(super) fn draw_gpu(frame: &mut Frame, area: Rect, ui: &Ui) {
     let panel = cpu::block("6:GPU", ui.pane == Pane::Gpu, &ui.theme);
     frame.render_widget(panel.clone(), area);
     let inner = panel.inner(area);
+    let [devices, processes] =
+        Layout::vertical([Constraint::Length(5), Constraint::Min(0)]).areas(inner);
+    draw_gpu_devices(frame, devices, ui);
+    draw_gpu_processes(frame, processes, ui);
+}
+
+fn draw_gpu_devices(frame: &mut Frame, area: Rect, ui: &Ui) {
     let mut lines = vec![Line::from(Span::styled(
         "DEVICE                    USE   VRAM           TEMP   POWER",
         Style::default().add_modifier(Modifier::BOLD),
@@ -159,11 +198,82 @@ pub(super) fn draw_gpu(frame: &mut Frame, area: Rect, ui: &Ui) {
         .gpu
         .devices
         .iter()
-        .take(inner.height.saturating_sub(2) as usize)
+        .take(area.height.saturating_sub(2) as usize)
     {
         lines.push(gpu_line(device, &ui.theme));
     }
+    if ui
+        .snap
+        .gpu
+        .devices
+        .iter()
+        .any(|device| device.vendor == "Intel")
+    {
+        lines.push(Line::from(Span::styled(
+            "Intel integrated GPU uses shared system RAM",
+            Style::default().fg(ui.theme.muted),
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn draw_gpu_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let panel = cpu::block("GPU PROCESSES", false, &ui.theme);
+    frame.render_widget(panel.clone(), area);
+    let inner = panel.inner(area);
+    let mut rows = gpu_process_rows(ui, inner.width as usize);
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut lines = vec![Line::from(Span::styled(
+        "PID    USER         GPU%  CPU%  RAM%   GPU MEM  DEVICE       COMMAND",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))];
+    if rows.is_empty() {
+        lines.push(Line::from("no processes using readable GPU"));
+    }
+    lines.extend(
+        rows.into_iter()
+            .take(inner.height.saturating_sub(2) as usize)
+            .map(|(_, line)| Line::from(line)),
+    );
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn gpu_process_rows(ui: &Ui, width: usize) -> Vec<(f32, String)> {
+    let total_mem = ui.snap.total_mem_bytes.max(1) as f64;
+    ui.snap
+        .gpu
+        .devices
+        .iter()
+        .flat_map(|device| {
+            device.processes.iter().filter_map(|gpu_process| {
+                let process = ui
+                    .snap
+                    .processes
+                    .iter()
+                    .find(|p| p.pid == gpu_process.pid)?;
+                let gpu_percent = gpu_process.gpu_percent.unwrap_or(0.0);
+                let ram_percent = process.mem_bytes as f64 / total_mem * 100.0;
+                let command_width = width.saturating_sub(68);
+                Some((
+                    gpu_percent,
+                    format!(
+                        "{:>6} {:<12} {:>4.1} {:>5.1} {:>5.1} {:>8} {:<12} {}",
+                        process.pid,
+                        cpu::truncate(&process.user, 12),
+                        gpu_percent,
+                        process.cpu_percent,
+                        ram_percent,
+                        gpu_process
+                            .memory_used_bytes
+                            .map(cpu::short_bytes)
+                            .unwrap_or_else(|| "--".into()),
+                        cpu::truncate(&device.name, 12),
+                        cpu::truncate(&process.cmd, command_width),
+                    ),
+                ))
+            })
+        })
+        .collect()
 }
 
 fn gpu_line(device: &GpuInfo, theme: &Theme) -> Line<'static> {
@@ -325,6 +435,7 @@ mod tests {
             memory_total_bytes: Some(2 * 1024 * 1024 * 1024),
             temperature_c: None,
             power_w: None,
+            processes: Vec::new(),
         };
         assert_eq!(gpu_memory(&device), "512M/2.0G".to_string());
     }
