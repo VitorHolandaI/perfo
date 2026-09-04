@@ -18,10 +18,17 @@ BarWidget {
   readonly property string memLabel: snapshot && snapshot.total_mem_bytes > 0
     ? "M " + Math.round(snapshot.used_mem_bytes * 100 / snapshot.total_mem_bytes) + "%"
     : "M --"
-  readonly property string label: cpuLabel + "  " + memLabel
+  readonly property string gpuLabel: snapshot && snapshot.gpu && snapshot.gpu.devices && snapshot.gpu.devices.length > 0 && snapshot.gpu.devices[0].usage_percent !== null
+    ? "G " + Math.round(snapshot.gpu.devices[0].usage_percent) + "%"
+    : ""
+  readonly property string label: {
+    var parts = [cpuLabel, memLabel]
+    if (gpuLabel) parts.push(gpuLabel)
+    return parts.join("  ")
+  }
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
-  implicitWidth: root.vertical ? root.barSize : 112
+  implicitWidth: root.vertical ? root.barSize : 170
   implicitHeight: root.barSize
 
   function injectPanel() {
