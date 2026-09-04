@@ -453,7 +453,7 @@ fn handle_normal_key(
             state.sort = SortKey::Cpu;
             false
         }
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('M') => {
             state.sort = SortKey::Mem;
             false
         }
@@ -499,7 +499,7 @@ fn handle_normal_key(
             state.help = true;
             false
         }
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('m') => {
             state.show_menu = !state.show_menu;
             false
         }
