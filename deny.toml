@@ -1,10 +1,5 @@
 [advisories]
 version = 2
-ignore = [
-  # paste (transitiva, via compact_str) esta na ultima versao; crate parado
-  # mas sem substituto no grafo atual.
-  "RUSTSEC-2024-0436",
-]
 
 [bans]
 multiple-versions = "deny"
@@ -12,10 +7,8 @@ skip = [
   # syn 2.x + 3.x coexistem transitivamente (proc-macro2 / macros);
   # divergencia rastreada pelo rust-doctor, sem fix disponivel.
   { name = "syn", version = "2" },
-  # quebras de versao maiores da propria lib (0.1 -> 0.2 e 0.59 -> 0.61),
-  # esperadas no ecossistema, sem conflito real.
-  { name = "unicode-width", version = "0.1" },
-  { name = "windows-sys", version = "0.59" },
+  # Ratatui 0.30 usa hashbrown 0.16 via kasuari, enquanto lru 0.18 usa 0.17.
+  { name = "hashbrown", version = "0.16" },
 ]
 
 [licenses]

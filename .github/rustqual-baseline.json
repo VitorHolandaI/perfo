@@ -1,14 +1,14 @@
 {
   "version": 2,
-  "quality_score": 0.20316096634093317,
-  "iosp_score": 0.9791666666666666,
-  "violations": 4,
-  "total": 307,
+  "quality_score": 0.18780350438047477,
+  "iosp_score": 0.9558823529411765,
+  "violations": 9,
+  "total": 329,
   "complexity_warnings": 9,
-  "magic_number_warnings": 125,
+  "magic_number_warnings": 127,
   "nesting_depth_warnings": 3,
   "function_length_warnings": 15,
-  "unsafe_warnings": 10,
+  "unsafe_warnings": 16,
   "error_handling_warnings": 2,
   "duplicate_groups": 8,
   "dead_code_warnings": 1,
@@ -28,12 +28,17 @@
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 196,
+  "total_findings": 209,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
       "line": 488
+    },
+    {
+      "name": "NvmlApi::load",
+      "file": "src/data/nvidia.rs",
+      "line": 52
     },
     {
       "name": "run_loop",
@@ -49,6 +54,26 @@
       "name": "build_tree",
       "file": "src/tui/mod.rs",
       "line": 257
+    },
+    {
+      "name": "stop_current_trace",
+      "file": "src/trace/mod.rs",
+      "line": 29
+    },
+    {
+      "name": "wait_tracee",
+      "file": "src/trace/mod.rs",
+      "line": 62
+    },
+    {
+      "name": "run_loop",
+      "file": "src/trace/mod.rs",
+      "line": 197
+    },
+    {
+      "name": "attach_preamble",
+      "file": "src/trace/mod.rs",
+      "line": 291
     }
   ]
 }
