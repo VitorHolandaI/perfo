@@ -38,11 +38,11 @@ dependencies on pull requests.
 
 ## Ubuntu Install
 
-The current Git remote is an internal SSH repository. This command works on an
-Ubuntu-based machine that can reach `10.66.66.11` and has SSH access:
+The public GitHub repository can be built and installed on an Ubuntu-based
+machine with this command:
 
 ```bash
-sudo apt update && sudo apt install -y build-essential curl git && (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) && . "$HOME/.cargo/env" && git clone git@10.66.66.11:vitor/perfo.git "$HOME/src/perfo" && cargo install --locked --path "$HOME/src/perfo" --root "$HOME/.local"
+sudo apt update && sudo apt install -y build-essential curl git && (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y) && . "$HOME/.cargo/env" && git clone https://github.com/VitorHolandaI/perfo.git "$HOME/src/perfo" && cargo install --locked --path "$HOME/src/perfo" --root "$HOME/.local"
 ```
 
 The command installs `perfo` at `~/.local/bin/perfo`. If that directory is not
@@ -52,9 +52,9 @@ in `PATH`, open a new shell or add it:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The repository is not public yet. After publishing it on GitHub, GitLab or
-another reachable Git server, replace the clone URL in the command with the
-public repository URL. The build and installation steps do not change.
+The repository is published at
+`https://github.com/VitorHolandaI/perfo`. The build and installation steps do
+not require a separate release artifact.
 
 ## Run In The Terminal
 

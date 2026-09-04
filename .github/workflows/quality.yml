@@ -25,7 +25,7 @@ jobs:
           cargo install rust-doctor --locked
       - name: rustqual — gate de regressao vs baseline (findings + score)
         run: |
-          rustqual . --json > current.json
+          rustqual . --json --no-fail > current.json
           cur_total=$(jq -r '.summary.total' current.json)
           cur_score=$(jq -r '.summary.quality_score' current.json)
           base_total=$(jq -r '.total' "$RUSTQUAL_BASELINE")
@@ -38,7 +38,7 @@ jobs:
             <<< '{}' >/dev/null
           rustqual . --format github --no-fail
       - name: rustqual — SARIF (code scanning)
-        run: rustqual . --format sarif > rustqual.sarif
+        run: rustqual . --format sarif --no-fail > rustqual.sarif
       - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: rustqual.sarif

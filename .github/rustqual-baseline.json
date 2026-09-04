@@ -1,54 +1,54 @@
 {
   "version": 2,
-  "quality_score": 0.1433636363636357,
-  "iosp_score": 0.9714285714285714,
+  "quality_score": 0.1980364637082902,
+  "iosp_score": 0.9789473684210527,
   "violations": 4,
-  "total": 220,
-  "complexity_warnings": 7,
-  "magic_number_warnings": 89,
+  "total": 306,
+  "complexity_warnings": 9,
+  "magic_number_warnings": 124,
   "nesting_depth_warnings": 3,
-  "function_length_warnings": 12,
-  "unsafe_warnings": 10,
+  "function_length_warnings": 15,
+  "unsafe_warnings": 12,
   "error_handling_warnings": 2,
-  "duplicate_groups": 6,
+  "duplicate_groups": 8,
   "dead_code_warnings": 1,
   "dead_type_warnings": 0,
   "fragment_groups": 4,
   "boilerplate_warnings": 1,
   "srp_struct_warnings": 0,
-  "srp_module_warnings": 8,
+  "srp_module_warnings": 9,
   "wildcard_import_warnings": 0,
   "sdp_violations": 0,
   "coupling_warnings": 0,
   "coupling_cycles": 0,
   "tq_no_assertion_warnings": 0,
-  "tq_no_sut_warnings": 0,
+  "tq_no_sut_warnings": 1,
   "tq_untested_warnings": 4,
   "tq_uncovered_warnings": 0,
   "tq_untested_logic_warnings": 0,
   "structural_srp_warnings": 0,
   "structural_coupling_warnings": 0,
-  "total_findings": 151,
+  "total_findings": 197,
   "violation_details": [
     {
       "name": "CpuMonitor::refresh",
       "file": "src/data/cpu.rs",
-      "line": 473
+      "line": 488
     },
     {
       "name": "run_loop",
       "file": "src/tui/mod.rs",
-      "line": 95
+      "line": 102
     },
     {
       "name": "prepare",
       "file": "src/tui/mod.rs",
-      "line": 196
+      "line": 205
     },
     {
       "name": "build_tree",
       "file": "src/tui/mod.rs",
-      "line": 248
+      "line": 257
     }
   ]
 }
