@@ -56,6 +56,7 @@ pub struct Ui<'a> {
     pub theme: Theme,
     pub help: bool,
     pub help_page: usize,
+    pub show_menu: bool,
     pub lang: crate::tui::Lang,
     pub tracing: bool,
     pub trace_lines: Option<&'a std::collections::VecDeque<String>>,
@@ -262,6 +263,9 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
     }
     if ui.help {
         draw_help(frame, frame.area(), ui);
+    }
+    if ui.show_menu {
+        draw_menu(frame, frame.area(), ui);
     }
 }
 
@@ -1014,20 +1018,14 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         return;
     }
     let title = match (ui.tree, ui.core_filter) {
-        (true, Some(c)) => format!("4:PROCS — core {c} (tree)"),
-        (false, Some(c)) => format!("4:PROCS — core {c}"),
-        (true, None) => "4:PROCS (tree)".to_string(),
-        (false, None) => "4:PROCS".to_string(),
+        (true, Some(c)) => format!("PROCS — core {c} (tree)"),
+        (false, Some(c)) => format!("PROCS — core {c}"),
+        (true, None) => "PROCS (tree)".to_string(),
+        (false, None) => "PROCS".to_string(),
     };
     let focused = ui.pane == Pane::Cpu;
     frame.render_widget(block(&title, focused, &ui.theme), area);
     let inner = block(&title, focused, &ui.theme).inner(area);
-
-    // Split: cores at top, process table below.
-    let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2) as u16;
-    let [cores_area, table_area] =
-        Layout::vertical([Constraint::Length(core_lines), Constraint::Min(0)]).areas(inner);
-    draw_cores(frame, cores_area, ui);
 
     let widths = [
         Constraint::Length(8),
@@ -1092,7 +1090,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         .column_spacing(1)
         .row_highlight_style(Style::default().bg(ui.theme.selection))
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(table, table_area, &mut ts);
+    frame.render_stateful_widget(table, inner, &mut ts);
 }
 
 fn draw_trace(frame: &mut Frame, area: Rect, ui: &Ui) {
@@ -1145,6 +1143,54 @@ fn draw_help(frame: &mut Frame, area: Rect, ui: &Ui) {
     frame.render_widget(Clear, area);
     frame.render_widget(block.clone(), area);
     frame.render_widget(Paragraph::new(text), block.inner(area));
+}
+
+fn draw_menu(frame: &mut Frame, area: Rect, ui: &Ui) {
+    let bg = match ui.theme.bg {
+        Color::Reset => Color::Black,
+        c => c,
+    };
+    let items: Vec<(&str, &str)> = vec![
+        ("1", "CPU + processos"),
+        ("2", "I/O (discos)"),
+        ("3", "Rede"),
+        ("Tab", "Painel seguinte"),
+        ("← →", "Navegar cores"),
+        ("↑ ↓", "Selecionar processo"),
+        ("Enter", "Filtrar por core"),
+        ("c", "Cmd completo"),
+        ("/", "Buscar"),
+        ("z", "Pausar"),
+        ("q", "Sair"),
+    ];
+    let text: Vec<Line> = items
+        .iter()
+        .map(|pair| {
+            let (k, d) = *pair;
+            Line::from(vec![
+                Span::styled(format!(" {k:<5}"), Style::default().fg(ui.theme.yellow)),
+                Span::styled(d, Style::default().fg(ui.theme.fg)),
+            ])
+        })
+        .collect();
+    let h = items.len() as u16 + 2;
+    let w: u16 = 28;
+    let x = (area.width.saturating_sub(w)) / 2;
+    let y = (area.height.saturating_sub(h)) / 2;
+    let menu_area = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ui.theme.accent))
+        .style(Style::default().bg(bg))
+        .title(" MENU ");
+    frame.render_widget(Clear, menu_area);
+    frame.render_widget(block.clone(), menu_area);
+    frame.render_widget(Paragraph::new(text), block.inner(menu_area));
 }
 
 #[cfg(test)]

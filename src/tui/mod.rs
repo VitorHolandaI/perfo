@@ -59,6 +59,7 @@ struct State {
     lang: Lang,
     help: bool,
     help_page: usize,
+    show_menu: bool,
     tracing: bool,
     trace_start_pid: Option<u32>,
 }
@@ -86,6 +87,7 @@ impl Default for State {
             lang: Lang::Pt,
             help: false,
             help_page: 0,
+            show_menu: false,
             tracing: false,
             trace_start_pid: None,
         }
@@ -175,6 +177,7 @@ fn run_loop(
                 theme,
                 help: state.help,
                 help_page: state.help_page,
+                show_menu: state.show_menu,
                 lang: state.lang,
                 tracing: state.tracing || trace_thread.is_some(),
                 trace_lines: if state.tracing || trace_thread.is_some() {
@@ -494,6 +497,10 @@ fn handle_normal_key(
         KeyCode::Char('L') => toggle_lang(state),
         KeyCode::Char('?') => {
             state.help = true;
+            false
+        }
+        KeyCode::Char('m') | KeyCode::Char('M') => {
+            state.show_menu = !state.show_menu;
             false
         }
         KeyCode::Char('s') => start_trace(state),
