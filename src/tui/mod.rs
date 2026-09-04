@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn keys_toggle_sort_pause_theme() {
         let mut s = State::default();
-        handle_key(&mut s, &[], KeyCode::Char('m'), KeyModifiers::empty(), None);
+        handle_key(&mut s, &[], KeyCode::Char('M'), KeyModifiers::empty(), None);
         assert_eq!(s.sort, SortKey::Mem);
         handle_key(&mut s, &[], KeyCode::Char('p'), KeyModifiers::empty(), None);
         assert_eq!(s.sort, SortKey::Cpu);
