@@ -472,15 +472,16 @@ Panel {
           Text { text: "COOLING / FANS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
           Text { text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "CPU " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "CPU TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
           Text { text: root.fans().length > 0 ? "EVERY DETECTED COOLER" : "NO READABLE COOLERS"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-           Repeater {
-             model: root.fans()
-             delegate: Row {
-               width: fanPage.width
-               Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-               Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-               Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-           }
-         }
+Repeater {
+              model: root.fans()
+              delegate: Row {
+                width: fanPage.width
+                height: Style.space(22)
+                Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+                Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter }
+                Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+            }
+          }
 
 GpuPage {
              width: parent.width
