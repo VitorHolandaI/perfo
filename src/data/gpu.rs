@@ -8,6 +8,8 @@ const AMD_VENDOR_ID: &str = "0x1002";
 const PERF_FORMAT_TOTAL_TIME_ENABLED: u64 = 1;
 const PERF_FORMAT_TOTAL_TIME_RUNNING: u64 = 2;
 const PERF_EVENT_ATTR_SIZE: u32 = 64;
+// The i915 PMU rejects the all-CPUs sentinel for device-wide events.
+const PERF_MONITOR_CPU: i32 = 0;
 
 #[derive(Clone, Serialize)]
 pub struct GpuInfo {
@@ -135,7 +137,7 @@ impl PerfCounter {
                 libc::SYS_perf_event_open,
                 &attr,
                 -1_i32,
-                -1_i32,
+                PERF_MONITOR_CPU,
                 -1_i32,
                 0_u64,
             ) as RawFd
@@ -279,8 +281,14 @@ fn hwmon_temperature(device: &Path) -> Option<f32> {
 
 fn event_config(path: &Path) -> Option<u64> {
     let raw = read_trimmed(path)?;
-    raw.strip_prefix("event=")
-        .and_then(|value| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok())
+    parse_event_config(&raw)
+}
+
+fn parse_event_config(raw: &str) -> Option<u64> {
+    let value = raw
+        .strip_prefix("event=")
+        .or_else(|| raw.strip_prefix("config="))?;
+    u64::from_str_radix(value.trim_start_matches("0x"), 16).ok()
 }
 
 fn read_counter(fd: RawFd) -> Option<CounterSample> {
@@ -324,9 +332,10 @@ mod tests {
     }
 
     #[test]
-    fn event_config_reads_hex_event() {
-        assert_eq!(event_config_from("event=0x1234"), Some(0x1234));
-        assert_eq!(event_config_from("other=0x1234"), None);
+    fn event_config_reads_kernel_formats() {
+        assert_eq!(parse_event_config("event=0x1234"), Some(0x1234));
+        assert_eq!(parse_event_config("config=0x1234"), Some(0x1234));
+        assert_eq!(parse_event_config("other=0x1234"), None);
     }
 
     #[test]
@@ -353,10 +362,5 @@ mod tests {
     fn read_percent_from(raw: &str) -> Option<f32> {
         let value = raw.trim().parse::<f32>().ok()?;
         value.is_finite().then(|| value.clamp(0.0, 100.0))
-    }
-
-    fn event_config_from(raw: &str) -> Option<u64> {
-        raw.strip_prefix("event=")
-            .and_then(|value| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok())
     }
 }

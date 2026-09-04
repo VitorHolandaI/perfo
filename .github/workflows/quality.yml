@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   RUSTQUAL_BASELINE: .github/rustqual-baseline.json
   # Gate do rust-doctor: falha abaixo de 70/100.
