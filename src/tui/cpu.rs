@@ -80,7 +80,7 @@ fn cpu_color(v: f32, theme: &Theme) -> Color {
 fn bar(value: f32, width: usize) -> String {
     let filled = ((value / 100.0) * width as f32).round() as usize;
     let filled = filled.min(width);
-    format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
+    format!("{}{}", "•".repeat(filled), "·".repeat(width - filled))
 }
 
 fn ghz(f: u64) -> String {
@@ -538,10 +538,10 @@ fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
     let pct = m.used as f32 / m.total.max(1) as f32 * 100.0;
 
     let bar_line = Line::from(vec![
-        Span::styled("█".repeat(used_w), Style::default().fg(ui.theme.green)),
-        Span::styled("█".repeat(cache_w), Style::default().fg(ui.theme.yellow)),
-        Span::styled("█".repeat(buf_w), Style::default().fg(ui.theme.accent)),
-        Span::styled("░".repeat(free_w), Style::default().fg(ui.theme.muted)),
+        Span::styled("•".repeat(used_w), Style::default().fg(ui.theme.green)),
+        Span::styled("•".repeat(cache_w), Style::default().fg(ui.theme.yellow)),
+        Span::styled("•".repeat(buf_w), Style::default().fg(ui.theme.accent)),
+        Span::styled("·".repeat(free_w), Style::default().fg(ui.theme.muted)),
         Span::styled(
             format!(" {:>4.0}%", pct),
             Style::default()
@@ -564,11 +564,11 @@ fn draw_mem(frame: &mut Frame, area: Rect, ui: &Ui) {
         Line::from(vec![
             Span::styled("swap ", Style::default().fg(ui.theme.muted)),
             Span::styled(
-                "█".repeat(swap_used_w),
+                "•".repeat(swap_used_w),
                 Style::default().fg(ui.theme.yellow),
             ),
             Span::styled(
-                "░".repeat(bar_w.saturating_sub(swap_used_w)),
+                "·".repeat(bar_w.saturating_sub(swap_used_w)),
                 Style::default().fg(ui.theme.muted),
             ),
             Span::styled(
@@ -641,9 +641,9 @@ fn draw_disks(frame: &mut Frame, area: Rect, ui: &Ui) {
                 format!("{:<11} ", truncate(name, 11)),
                 Style::default().fg(ui.theme.muted),
             ),
-            Span::styled("█".repeat(filled), Style::default().fg(color)),
+            Span::styled("•".repeat(filled), Style::default().fg(color)),
             Span::styled(
-                "░".repeat(bar_w - filled),
+                "·".repeat(bar_w - filled),
                 Style::default().fg(ui.theme.muted),
             ),
             Span::styled(
@@ -1313,9 +1313,9 @@ mod tests {
 
     #[test]
     fn bar_fills_and_clamps() {
-        assert_eq!(bar(50.0, 10), "█████░░░░░");
-        assert_eq!(bar(200.0, 4), "████");
-        assert_eq!(bar(0.0, 4), "░░░░");
+        assert_eq!(bar(50.0, 10), "•••••·····");
+        assert_eq!(bar(200.0, 4), "••••");
+        assert_eq!(bar(0.0, 4), "····");
     }
 
     #[test]
