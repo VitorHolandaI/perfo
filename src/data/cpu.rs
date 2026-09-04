@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -644,6 +644,13 @@ impl CpuMonitor {
                 }
             })
             .collect();
+        let active_uids: HashSet<u32> = self
+            .sys
+            .processes()
+            .values()
+            .filter_map(|process| process.user_id().map(|uid| **uid))
+            .collect();
+        cache.retain(|uid, _| active_uids.contains(uid));
         self.users_cache = cache;
         processes.sort_by(|a, b| b.cpu_percent.total_cmp(&a.cpu_percent));
 

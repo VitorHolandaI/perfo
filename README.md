@@ -58,7 +58,7 @@ To install a specific release, set `PERFO_VERSION`, for example:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSLo /tmp/perfo-install.sh https://raw.githubusercontent.com/VitorHolandaI/perfo/main/install.sh
-PERFO_VERSION=v0.1.3 bash /tmp/perfo-install.sh
+PERFO_VERSION=v0.1.4 bash /tmp/perfo-install.sh
 rm /tmp/perfo-install.sh
 ```
 
