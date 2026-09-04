@@ -34,7 +34,6 @@ pub enum Pane {
     Cpu,
     Io,
     Net,
-    Procs,
 }
 
 pub struct Row<'a> {
@@ -238,7 +237,6 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
             Pane::Cpu => draw_cpu_pane(frame, body, ui),
             Pane::Io => draw_io(frame, body, ui),
             Pane::Net => draw_net(frame, body, ui),
-            Pane::Procs => draw_processes(frame, body, ui),
         }
         draw_status(frame, status_area, ui);
     } else {
@@ -267,10 +265,10 @@ pub fn draw(frame: &mut Frame, ui: &Ui) {
     }
 }
 
-/// Fullscreen CPU window: the core grid, then memory + disks side by side.
+/// Fullscreen CPU window: cores + process table + mem/disks.
 fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
     let core_lines = ui.snap.per_core.len().min(MAX_CORE_ROWS).div_ceil(2);
-    let [cpu_area, mid_area, _rest] = Layout::vertical([
+    let [cpu_area, mid_area, proc_area] = Layout::vertical([
         Constraint::Length(8 + core_lines as u16),
         Constraint::Length(7),
         Constraint::Min(0),
@@ -282,6 +280,7 @@ fn draw_cpu_pane(frame: &mut Frame, area: Rect, ui: &Ui) {
             .areas(mid_area);
     draw_mem(frame, mem_area, ui);
     draw_disks(frame, disk_area, ui);
+    draw_processes(frame, proc_area, ui);
 }
 
 fn block(title: &str, focused: bool, theme: &Theme) -> Block<'static> {
@@ -1020,7 +1019,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, ui: &Ui) {
         (true, None) => "4:PROCS (tree)".to_string(),
         (false, None) => "4:PROCS".to_string(),
     };
-    let focused = ui.pane == Pane::Procs;
+    let focused = ui.pane == Pane::Cpu;
     frame.render_widget(block(&title, focused, &ui.theme), area);
     let inner = block(&title, focused, &ui.theme).inner(area);
 
@@ -1104,7 +1103,7 @@ fn draw_trace(frame: &mut Frame, area: Rect, ui: &Ui) {
         Some(proc) => format!("TRACE {} {}", proc.pid, truncate(&proc.cmd, 50)),
         None => format!("TRACE {}", ui.trace_pid.unwrap_or(0)),
     };
-    let focused = ui.pane == Pane::Procs;
+    let focused = ui.pane == Pane::Cpu;
     frame.render_widget(block(&title, focused, &ui.theme), area);
     let inner = block(&title, focused, &ui.theme).inner(area);
     let lines: Vec<Line> = match ui.trace_lines {

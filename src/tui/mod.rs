@@ -79,7 +79,7 @@ impl Default for State {
             searching: false,
             kill_prompt: false,
             status_msg: None,
-            pane: Pane::Procs,
+            pane: Pane::Cpu,
             fullscreen: false,
             paused: false,
             use_system_theme: true,
@@ -434,8 +434,7 @@ fn handle_normal_key(
             state.pane = match state.pane {
                 Pane::Cpu => Pane::Io,
                 Pane::Io => Pane::Net,
-                Pane::Net => Pane::Procs,
-                Pane::Procs => Pane::Cpu,
+                Pane::Net => Pane::Cpu,
             };
             state.fullscreen = true;
             false
@@ -488,7 +487,7 @@ fn handle_normal_key(
             false
         }
         KeyCode::Char('4') => {
-            focus_pane(state, Pane::Procs);
+            focus_pane(state, Pane::Cpu);
             false
         }
         KeyCode::Char('C') => toggle_theme(state, system_theme),
@@ -513,7 +512,7 @@ fn handle_normal_key(
         | KeyCode::Home
         | KeyCode::End => handle_nav_key(state, display_pids, code),
         KeyCode::Left | KeyCode::Right => {
-            if state.pane == Pane::Cpu || state.pane == Pane::Procs {
+            if state.pane == Pane::Cpu {
                 move_core(state, code);
             }
             false
@@ -579,19 +578,28 @@ fn toggle_core_filter(state: &mut State) -> bool {
 }
 
 fn handle_nav_key(state: &mut State, display_pids: &[u32], code: KeyCode) -> bool {
-    if state.pane == Pane::Procs {
-        let delta = match code {
-            KeyCode::Up => -1,
-            KeyCode::Down => 1,
-            KeyCode::PageUp => -PAGE_STEP,
-            KeyCode::PageDown => PAGE_STEP,
-            KeyCode::Home => i32::MIN,
-            KeyCode::End => i32::MAX,
-            _ => return false,
-        };
-        move_selection(state, display_pids, delta);
-    } else if state.pane == Pane::Cpu {
-        move_core(state, code);
+    if state.pane == Pane::Cpu {
+        match code {
+            KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Home
+            | KeyCode::End => {
+                let delta = match code {
+                    KeyCode::Up => -1,
+                    KeyCode::Down => 1,
+                    KeyCode::PageUp => -PAGE_STEP,
+                    KeyCode::PageDown => PAGE_STEP,
+                    KeyCode::Home => i32::MIN,
+                    KeyCode::End => i32::MAX,
+                    _ => 0,
+                };
+                move_selection(state, display_pids, delta);
+            }
+            KeyCode::Left | KeyCode::Right => move_core(state, code),
+            _ => {}
+        }
     }
     false
 }
@@ -656,7 +664,6 @@ fn status_line(state: &State) -> String {
         Pane::Cpu => "[1:CPU pane] ",
         Pane::Io => "[2:IO pane] ",
         Pane::Net => "[3:NET pane] ",
-        Pane::Procs => "[4:PROCS pane] ",
     };
     let full = if state.fullscreen { "[FULL] " } else { "" };
     format!(
@@ -795,7 +802,7 @@ mod tests {
     #[test]
     fn pane_numbers_focus_and_toggle_back() {
         let mut s = State::default();
-        assert_eq!(s.pane, Pane::Procs);
+        assert_eq!(s.pane, Pane::Cpu);
         assert!(!s.fullscreen);
         // 1 expande CPU em tela cheia; repetir 1 volta pro dashboard.
         handle_key(&mut s, &[], KeyCode::Char('1'), KeyModifiers::empty(), None);
@@ -914,7 +921,7 @@ mod tests {
     #[test]
     fn status_line_shows_context() {
         let mut s = State::default();
-        assert!(status_line(&s).contains("[4:PROCS pane]"));
+        assert!(status_line(&s).contains("[1:CPU pane]"));
         s.paused = true;
         assert!(status_line(&s).contains("PAUSED"));
         s.core_filter = Some(3);

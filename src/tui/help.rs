@@ -106,7 +106,7 @@ pub fn page(page: usize, lang: Lang, theme: &Theme) -> (String, Vec<Line<'static
             "help 1/5 — keys".into(),
             &[
                 hdr("PAGES — Tab cycles"),
-                key("Tab", "cycles: Procs → CPU → IO → NET"),
+                key("Tab", "cycles: Cpu → IO → NET"),
                 key("1-4", "focus a pane (1 CPU · 2 IO · 3 NET · 4 PROC);"),
                 key("", "repeat the focused pane's number to return to previous"),
                 key("← →", "CPU pane: move the focused core"),
