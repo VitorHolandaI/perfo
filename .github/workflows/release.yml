@@ -51,6 +51,16 @@ jobs:
           cargo_version=$(cargo metadata --format-version 1 --no-deps --locked | jq -r '.packages[0].version')
           manifest_version=$(jq -r '.version' manifest.json)
           test "$cargo_version" = "$manifest_version"
+
+          # Fail before the build rather than after `git tag`. The stamp step
+          # commits bin/perfo and bundle.json before tagging, so a collision
+          # discovered there aborts between the commit and the atomic push and
+          # leaves main carrying digests that no longer match its own files.
+          if git rev-parse -q --verify "refs/tags/v${cargo_version}" >/dev/null; then
+            echo "::error::Tag v${cargo_version} already exists. Bump the version in Cargo.toml and manifest.json before releasing."
+            exit 1
+          fi
+
           echo "version=${cargo_version}" >> "$GITHUB_OUTPUT"
 
       - name: Rust gates
