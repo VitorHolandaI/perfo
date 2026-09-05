@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import qs.Ui
 
 BarWidget {
@@ -32,11 +33,13 @@ BarWidget {
   implicitHeight: root.barSize
 
   function injectPanel() {
-    if (!panelLoader.item) return
-    panelLoader.item.bar = root.bar
-    panelLoader.item.anchorItem = button
-    panelLoader.item.hostWidget = root
-    panelLoader.item.snapshot = root.snapshot
+    var target = panelLoader.item
+    if (!target) return
+    if ("bar" in target) target.bar = root.bar
+    if ("settings" in target) target.settings = root.settings
+    if ("anchorItem" in target) target.anchorItem = root
+    if ("hostWidget" in target) target.hostWidget = root
+    if ("snapshot" in target) target.snapshot = root.snapshot
   }
 
   function open() {
@@ -84,35 +87,23 @@ BarWidget {
     active: true
     source: Qt.resolvedUrl("Panel.qml")
     visible: false
-    onLoaded: root.injectPanel()
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
   }
 
-  Item {
+  WidgetButton {
     id: button
     anchors.fill: parent
-    anchors.leftMargin: 6
-    anchors.rightMargin: 6
+    bar: root.bar
+    text: root.label
+    horizontalMargin: 6
+    tooltipText: "Left click for metrics, right click for full TUI"
 
-    Text {
-      anchors.fill: parent
-      text: root.label
-      color: root.bar ? root.bar.barForeground : "white"
-      font.family: root.bar ? root.bar.fontFamily : "monospace"
-      font.pixelSize: 13
-      horizontalAlignment: Text.AlignHCenter
-      verticalAlignment: Text.AlignVCenter
-      elide: Text.ElideRight
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      acceptedButtons: Qt.LeftButton | Qt.RightButton
-      onClicked: function(mouse) {
-        if (mouse.button === Qt.LeftButton) root.toggle()
-        else if (mouse.button === Qt.RightButton && panelLoader.item) panelLoader.item.openTerminal()
-      }
-      onEntered: if (root.bar) root.bar.showTooltip(root, "Perfo: left click for metrics, right click for full TUI")
-      onExited: if (root.bar) root.bar.hideTooltip(root)
+    onPressed: function(b) {
+      if (b === Qt.LeftButton) root.toggle()
+      else if (b === Qt.RightButton && panelLoader.item) panelLoader.item.openTerminal()
     }
   }
 }

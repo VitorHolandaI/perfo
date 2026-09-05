@@ -63,13 +63,6 @@ Panel {
     return isFinite(number) ? Math.max(0, Math.min(100, number)) : 0
   }
 
-  function memoryPercent(used, total) {
-    var usedBytes = Number(used)
-    var totalBytes = Number(total)
-    if (!isFinite(usedBytes) || !isFinite(totalBytes) || totalBytes <= 0) return 0
-    return Math.max(0, Math.min(100, usedBytes * 100 / totalBytes))
-  }
-
   function historyMax(values, floor) {
     var maximum = Number(floor) || 1
     if (!values) return maximum
@@ -139,7 +132,6 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    centerOnBar: true
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(500))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
@@ -222,7 +214,7 @@ Panel {
              width: parent.width
              spacing: Style.space(16)
              Text { width: root.metricValueWidth; text: root.snapshot ? "CPU " + Math.round(root.snapshot.overall_percent) + "%" : "CPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-              Text { width: root.metricValueWidth; text: root.snapshot ? "MEM " + Math.round(root.memoryPercent(root.snapshot.used_mem_bytes, root.snapshot.total_mem_bytes)) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             Text { width: root.metricValueWidth; text: root.snapshot ? "MEM " + Math.round(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
              Text { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
           }
           Rectangle {
@@ -433,8 +425,8 @@ Panel {
           spacing: Style.space(10)
           visible: root.page === 4
           Text { text: "MEMORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-           Text { text: root.snapshot ? Math.round(root.memoryPercent(root.snapshot.used_mem_bytes, root.snapshot.total_mem_bytes)) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
-           Rectangle { width: parent.width; height: Style.space(14); color: root.foreground; opacity: 0.15; Rectangle { width: parent.width * root.memoryPercent(root.snapshot ? root.snapshot.used_mem_bytes : 0, root.snapshot ? root.snapshot.total_mem_bytes : 0) / 100; height: parent.height; color: Color.accent; opacity: 1 } }
+          Text { text: root.snapshot ? Math.round(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
+          Rectangle { width: parent.width; height: Style.space(14); color: root.foreground; opacity: 0.15; Rectangle { width: parent.width * (root.snapshot ? root.percent(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) / 100 : 0); height: parent.height; color: Color.accent; opacity: 1 } }
            Row {
              width: parent.width
              Text { width: root.metricLabelWidth; text: "USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
@@ -464,22 +456,22 @@ Panel {
           }
         }
 
-Column {
-            id: fanPage
+        Column {
+          id: fanPage
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 6
           Text { text: "COOLING / FANS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
           Text { text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "CPU " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "CPU TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
           Text { text: root.fans().length > 0 ? "EVERY DETECTED COOLER" : "NO READABLE COOLERS"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-Repeater {
-              model: root.fans()
-              delegate: Row {
-                width: fanPage.width
-                height: Style.space(22)
-                Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
-                Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter }
-                Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+          Repeater {
+            model: root.fans()
+            delegate: Row {
+              width: fanPage.width
+              height: Style.space(22)
+              Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+              Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter }
+              Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
             }
           }
         }
