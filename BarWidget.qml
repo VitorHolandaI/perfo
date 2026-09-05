@@ -9,10 +9,18 @@ BarWidget {
   moduleName: "vitor.perfo"
   property var manifest: null
   property var snapshot: null
+
+  // The shell injects `manifest` for bar, service and panel kinds only, never
+  // for bar-widget, so the binary is resolved relative to this file instead.
+  readonly property string bundledBinaryPath: {
+    var resolved = String(Qt.resolvedUrl("bin/perfo"))
+    return resolved.indexOf("file://") === 0 ? resolved.substring(7) : resolved
+  }
   readonly property string binaryPath: {
-    if (manifest && manifest.__sourceDir)
-      return String(manifest.__sourceDir) + "/bin/perfo"
-    return Quickshell.env("PERFO_BIN") || (Quickshell.env("HOME") + "/.local/bin/perfo")
+    var override = Quickshell.env("PERFO_BIN")
+    if (override) return override
+    if (bundledBinaryPath) return bundledBinaryPath
+    return Quickshell.env("HOME") + "/.local/bin/perfo"
   }
 
   readonly property string cpuLabel: snapshot ? "C " + Math.round(snapshot.overall_percent) + "%" : "C --"
@@ -29,7 +37,7 @@ BarWidget {
   }
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
-  implicitWidth: root.vertical ? root.barSize : 170
+  implicitWidth: root.vertical ? root.barSize : button.implicitWidth
   implicitHeight: root.barSize
 
   function injectPanel() {

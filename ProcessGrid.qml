@@ -4,6 +4,10 @@ import qs.Commons
 Grid {
   id: processGrid
 
+  // The delegate below divides the available width by this count; keep them
+  // in step or the rows overflow the panel.
+  columns: 2
+
   property var processes: []
   property color foreground: "white"
   property string fontFamily: "monospace"

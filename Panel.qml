@@ -70,16 +70,50 @@ Panel {
     return maximum
   }
 
-  function firstIoHistory() {
+  // Guarded so a zero total never yields Infinity/NaN in a label or a width.
+  readonly property real memPercent: (root.snapshot && root.snapshot.total_mem_bytes > 0)
+    ? root.percent(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes)
+    : 0
+  readonly property bool hasMemPercent: root.snapshot !== null && root.snapshot !== undefined
+    && root.snapshot.total_mem_bytes > 0
+
+  // Recomputed once per snapshot rather than once per sparkline bar.
+  readonly property var ioHistory: root.snapshot ? root.busiestIoHistory() : { read: [], write: [] }
+
+  // io_history is keyed by every /proc/diskstats device, in arbitrary order,
+  // including virtual ones. Graph the busiest real device instead of whichever
+  // key happens to come first.
+  function busiestIoHistory() {
     if (!root.snapshot || !root.snapshot.io_history) return { read: [], write: [] }
     var keys = Object.keys(root.snapshot.io_history)
-    if (keys.length === 0) return { read: [], write: [] }
-    var history = root.snapshot.io_history[keys[0]]
+    var bestKey = ""
+    var bestTotal = -1
+    for (var index = 0; index < keys.length; index++) {
+      var key = keys[index]
+      if (/^(zram|loop|ram|sr|fd|dm-)/.test(key)) continue
+      var candidate = root.snapshot.io_history[key]
+      if (!candidate) continue
+      var total = 0
+      for (var series = 0; series < 2; series++) {
+        var samples = candidate[series] || []
+        for (var sample = 0; sample < samples.length; sample++) total += Number(samples[sample]) || 0
+      }
+      if (total > bestTotal) {
+        bestTotal = total
+        bestKey = key
+      }
+    }
+    if (!bestKey) return { read: [], write: [] }
+    var history = root.snapshot.io_history[bestKey]
     return { read: history[0] || [], write: history[1] || [] }
   }
 
+  function allDisks() {
+    return root.snapshot && root.snapshot.disks ? root.snapshot.disks : []
+  }
+
   function disks() {
-    return root.snapshot && root.snapshot.disks ? root.snapshot.disks.slice(0, 5) : []
+    return root.allDisks().slice(0, 5)
   }
 
   function interfaces() {
@@ -202,7 +236,7 @@ Panel {
       Item {
         width: parent.width
         height: Style.space(260)
-        clip: root.page === 0 || root.page === 1
+        clip: true
 
         Column {
           id: dashboardPage
@@ -214,7 +248,7 @@ Panel {
              width: parent.width
              spacing: Style.space(16)
              Text { width: root.metricValueWidth; text: root.snapshot ? "CPU " + Math.round(root.snapshot.overall_percent) + "%" : "CPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? "MEM " + Math.round(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             Text { width: root.metricValueWidth; text: root.hasMemPercent ? "MEM " + Math.round(root.memPercent) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
              Text { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
           }
           Rectangle {
@@ -341,8 +375,8 @@ Panel {
               spacing: 1
               Repeater {
                 id: ioHistoryRepeater
-                model: root.firstIoHistory().read
-                delegate: Rectangle { width: Math.max(1, (parent.width / Math.max(1, ioHistoryRepeater.count)) - 1); height: Math.max(2, parent.height * Number(modelData) / root.historyMax(root.firstIoHistory().read, 1)); anchors.bottom: parent.bottom; color: Color.accent }
+                model: root.ioHistory.read
+                delegate: Rectangle { width: Math.max(1, (parent.width / Math.max(1, ioHistoryRepeater.count)) - 1); height: Math.max(2, parent.height * Number(modelData) / root.historyMax(root.ioHistory.read, 1)); anchors.bottom: parent.bottom; color: Color.accent }
               }
             }
           }
@@ -425,8 +459,8 @@ Panel {
           spacing: Style.space(10)
           visible: root.page === 4
           Text { text: "MEMORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-          Text { text: root.snapshot ? Math.round(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
-          Rectangle { width: parent.width; height: Style.space(14); color: root.foreground; opacity: 0.15; Rectangle { width: parent.width * (root.snapshot ? root.percent(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes) / 100 : 0); height: parent.height; color: Color.accent; opacity: 1 } }
+          Text { text: root.hasMemPercent ? Math.round(root.memPercent) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
+          Rectangle { width: parent.width; height: Style.space(14); color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15); Rectangle { width: parent.width * root.memPercent / 100; height: parent.height; color: Color.accent } }
            Row {
              width: parent.width
              Text { width: root.metricLabelWidth; text: "USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
@@ -450,7 +484,7 @@ Panel {
               width: diskPage.width
               height: Style.space(34)
               Text { width: Style.space(92); text: modelData.mount; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight }
-              Rectangle { x: Style.space(96); y: Style.space(7); width: parent.width - Style.space(150); height: Style.space(10); color: root.foreground; opacity: 0.15; Rectangle { width: parent.width * root.percent(modelData.percent) / 100; height: parent.height; color: modelData.percent >= 90 ? Color.urgent : Color.accent; opacity: 1 } }
+              Rectangle { x: Style.space(96); y: Style.space(7); width: parent.width - Style.space(150); height: Style.space(10); color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15); Rectangle { width: parent.width * root.percent(modelData.percent) / 100; height: parent.height; color: modelData.percent >= 90 ? Color.urgent : Color.accent } }
               Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Number(modelData.percent).toFixed(0) + "%"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
             }
           }
@@ -503,17 +537,29 @@ Panel {
     }
   }
 
-  function totalRead() {
+  // read_bps/write_bps are per block device, while `disks` is per mount, so
+  // several mounts on one device (btrfs subvolumes, bind mounts) repeat the
+  // same rate. Count each device once, and use the untruncated list so a
+  // filesystem past the fifth still contributes.
+  function totalDeviceRate(field) {
     var total = 0
-    var list = root.disks()
-    for (var index = 0; index < list.length; index++) total += Number(list[index].read_bps) || 0
+    var seen = ({})
+    var list = root.allDisks()
+    for (var index = 0; index < list.length; index++) {
+      var entry = list[index]
+      var device = String(entry.name || entry.mount || index)
+      if (seen[device]) continue
+      seen[device] = true
+      total += Number(entry[field]) || 0
+    }
     return total
   }
 
+  function totalRead() {
+    return root.totalDeviceRate("read_bps")
+  }
+
   function totalWrite() {
-    var total = 0
-    var list = root.disks()
-    for (var index = 0; index < list.length; index++) total += Number(list[index].write_bps) || 0
-    return total
+    return root.totalDeviceRate("write_bps")
   }
 }
