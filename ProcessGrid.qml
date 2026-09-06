@@ -27,7 +27,7 @@ Grid {
     delegate: Row {
       width: (processGrid.width - processGrid.columnSpacing) / 2
 
-      Text {
+      PlainText {
         width: parent.width - processGrid.processCpuWidth
         text: processGrid.processName(modelData.name || modelData.cmd, modelData.pid)
         color: processGrid.foreground
@@ -36,7 +36,7 @@ Grid {
         elide: Text.ElideRight
       }
 
-      Text {
+      PlainText {
         width: processGrid.processCpuWidth
         text: Math.round(Number(modelData.cpu_percent) || 0) + "%"
         color: processGrid.foreground

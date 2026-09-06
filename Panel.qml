@@ -195,11 +195,11 @@ Panel {
         Column {
           width: parent.width - Style.space(88)
           anchors.verticalCenter: parent.verticalCenter
-          Text { text: "PERFO"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
-          Text { text: root.pageNames[root.page] + " FOCUS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "PERFO"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+          PlainText { text: root.pageNames[root.page] + " FOCUS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
         }
 
-        Text {
+        PlainText {
           width: Style.space(30)
           text: "<"
           color: root.foreground
@@ -210,7 +210,7 @@ Panel {
           MouseArea { anchors.fill: parent; onClicked: root.switchPage(-1) }
         }
 
-        Text {
+        PlainText {
           width: Style.space(30)
           text: ">"
           color: root.foreground
@@ -221,7 +221,7 @@ Panel {
           MouseArea { anchors.fill: parent; onClicked: root.switchPage(1) }
         }
 
-        Text {
+        PlainText {
           width: Style.space(28)
           text: (root.page + 1) + "/" + root.pageNames.length
           color: root.foreground
@@ -243,13 +243,13 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 0
-          Text { text: "SYSTEM OVERVIEW"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "SYSTEM OVERVIEW"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            Row {
              width: parent.width
              spacing: Style.space(16)
-             Text { width: root.metricValueWidth; text: root.snapshot ? "CPU " + Math.round(root.snapshot.overall_percent) + "%" : "CPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.hasMemPercent ? "MEM " + Math.round(root.memPercent) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? "CPU " + Math.round(root.snapshot.overall_percent) + "%" : "CPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.hasMemPercent ? "MEM " + Math.round(root.memPercent) + "%" : "MEM --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
           }
           Rectangle {
             width: parent.width
@@ -271,13 +271,13 @@ Panel {
            Row {
              width: parent.width
              spacing: Style.space(12)
-             Text { width: root.metricValueWidth * 2; text: root.snapshot ? "NET " + root.formatRate(root.snapshot.net.totals.rx_bps) + " / " + root.formatRate(root.snapshot.net.totals.tx_bps) : "NET --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: root.metricValueWidth * 2; text: root.snapshot ? "IO " + root.formatRate(root.totalRead()) + " / " + root.formatRate(root.totalWrite()) : "IO --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricValueWidth * 2; text: root.snapshot ? "NET " + root.formatRate(root.snapshot.net.totals.rx_bps) + " / " + root.formatRate(root.snapshot.net.totals.tx_bps) : "NET --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricValueWidth * 2; text: root.snapshot ? "IO " + root.formatRate(root.totalRead()) + " / " + root.formatRate(root.totalWrite()) : "IO --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
           }
-           Text { text: root.snapshot && root.disks().length > 0 ? "DISK " + root.disks()[0].mount + " " + Number(root.disks()[0].percent).toFixed(0) + "%" : "DISK --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-           Text { text: root.snapshot ? "FANS " + root.fans().length : "FANS --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-           Text { text: root.gpus().length > 0 ? "GPU " + root.gpus()[0].vendor + " " + (root.gpus()[0].usage_percent === null ? "--" : Number(root.gpus()[0].usage_percent).toFixed(0) + "%") : "GPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-           Text { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+           PlainText { text: root.snapshot && root.disks().length > 0 ? "DISK " + root.disks()[0].mount + " " + Number(root.disks()[0].percent).toFixed(0) + "%" : "DISK --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           PlainText { text: root.snapshot ? "FANS " + root.fans().length : "FANS --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           PlainText { text: root.gpus().length > 0 ? "GPU " + root.gpus()[0].vendor + " " + (root.gpus()[0].usage_percent === null ? "--" : Number(root.gpus()[0].usage_percent).toFixed(0) + "%") : "GPU --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+           PlainText { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            ProcessGrid {
              id: dashboardProcessGrid
              width: parent.width
@@ -294,7 +294,7 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 1
-          Text { text: "CPU HISTORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "CPU HISTORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
           Rectangle {
             width: parent.width
             height: Style.space(72)
@@ -312,7 +312,7 @@ Panel {
               }
             }
           }
-          Text { text: "PER-CORE"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "PER-CORE"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
           Row {
             width: parent.width
             height: Style.space(28)
@@ -326,11 +326,11 @@ Panel {
            Row {
              width: parent.width
              spacing: Style.space(16)
-             Text { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-             Text { width: root.metricValueWidth; text: root.snapshot ? "IOWAIT " + Number(root.snapshot.iowait_percent).toFixed(1) + "%" : "IOWAIT --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-             Text { width: root.metricValueWidth; text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "TEMP " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? "LOAD " + Number(root.snapshot.load_avg[0]).toFixed(2) : "LOAD --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? "IOWAIT " + Number(root.snapshot.iowait_percent).toFixed(1) + "%" : "IOWAIT --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricValueWidth; text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "TEMP " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
           }
-           Text { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+           PlainText { text: "TOP PROCESSES"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            ProcessGrid {
              width: parent.width
              processes: root.topProcesses(8)
@@ -346,22 +346,22 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 2
-          Text { text: "DISK ACTIVITY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "DISK ACTIVITY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            Row {
              width: parent.width
-             Text { width: root.metricLabelWidth; text: "READ"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.totalRead()) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricLabelWidth; text: "WRITE"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.totalWrite()) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "READ"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.totalRead()) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "WRITE"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.totalWrite()) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
            }
            Row {
              width: parent.width
-             Text { width: root.metricLabelWidth; text: "PRESSURE"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[0]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: Style.space(18); text: "/"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[1]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: Style.space(18); text: "/"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-             Text { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[2]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricLabelWidth; text: "PRESSURE"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[0]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: Style.space(18); text: "/"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[1]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: Style.space(18); text: "/"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? Number(root.snapshot.io_pressure_some[2]).toFixed(2) : "--"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
            }
           Rectangle {
             width: parent.width
@@ -384,9 +384,9 @@ Panel {
              model: root.disks()
              delegate: Row {
                width: ioPage.width
-               Text { width: root.tableMountWidth; text: modelData.mount; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-               Text { width: root.tableMetricWidth; text: "R " + root.formatRate(modelData.read_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-               Text { width: root.tableMetricWidth; text: "W " + root.formatRate(modelData.write_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+               PlainText { width: root.tableMountWidth; text: modelData.mount; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+               PlainText { width: root.tableMetricWidth; text: "R " + root.formatRate(modelData.read_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+               PlainText { width: root.tableMetricWidth; text: "W " + root.formatRate(modelData.write_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
              }
           }
         }
@@ -396,12 +396,12 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 3
-          Text { text: "NETWORK HISTORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "NETWORK HISTORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
            Row {
              width: parent.width
              spacing: Style.space(14)
-             Text { width: root.metricLabelWidth; text: "RX"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true }
-             Text { width: root.metricLabelWidth; text: "TX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "RX"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "TX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true }
           }
           Rectangle {
             width: parent.width
@@ -437,18 +437,18 @@ Panel {
           }
            Row {
              width: parent.width
-             Text { width: root.metricLabelWidth; text: "RX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.snapshot.net.totals.rx_bps) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricLabelWidth; text: "TX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.snapshot.net.totals.tx_bps) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "RX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.snapshot.net.totals.rx_bps) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricLabelWidth; text: "TX"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatRate(root.snapshot.net.totals.tx_bps) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
            }
            Repeater {
              model: root.interfaces()
              delegate: Row {
                width: netPage.width
-               Text { width: root.tableMountWidth; text: modelData.name; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-               Text { width: root.tableMetricWidth; text: "RX " + root.formatRate(modelData.rx_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-               Text { width: root.tableMetricWidth; text: "TX " + root.formatRate(modelData.tx_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+               PlainText { width: root.tableMountWidth; text: modelData.name; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+               PlainText { width: root.tableMetricWidth; text: "RX " + root.formatRate(modelData.rx_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+               PlainText { width: root.tableMetricWidth; text: "TX " + root.formatRate(modelData.tx_bps); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
              }
            }
         }
@@ -458,18 +458,18 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(10)
           visible: root.page === 4
-          Text { text: "MEMORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-          Text { text: root.hasMemPercent ? Math.round(root.memPercent) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
+          PlainText { text: "MEMORY"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: root.hasMemPercent ? Math.round(root.memPercent) + "% USED" : "-- USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.display; font.bold: true }
           Rectangle { width: parent.width; height: Style.space(14); color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15); Rectangle { width: parent.width * root.memPercent / 100; height: parent.height; color: Color.accent } }
            Row {
              width: parent.width
-             Text { width: root.metricLabelWidth; text: "USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatBytes(root.snapshot.used_mem_bytes) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-             Text { width: root.metricLabelWidth + Style.space(22); text: "AVAILABLE"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-             Text { width: root.metricValueWidth; text: root.snapshot ? root.formatBytes(root.snapshot.mem.available) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricLabelWidth; text: "USED"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatBytes(root.snapshot.used_mem_bytes) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricLabelWidth + Style.space(22); text: "AVAILABLE"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+             PlainText { width: root.metricValueWidth; text: root.snapshot ? root.formatBytes(root.snapshot.mem.available) : "--"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body }
            }
-          Text { text: root.snapshot ? "SWAP " + root.formatBytes(root.snapshot.mem.swap_used) + " / " + root.formatBytes(root.snapshot.mem.swap_total) : "SWAP --"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
-          Text { text: root.snapshot ? "PRESSURE " + Number(root.snapshot.mem.psi_some_10).toFixed(2) + " / " + Number(root.snapshot.mem.psi_some_60).toFixed(2) + " / " + Number(root.snapshot.mem.psi_some_300).toFixed(2) : "PRESSURE --"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+          PlainText { text: root.snapshot ? "SWAP " + root.formatBytes(root.snapshot.mem.swap_used) + " / " + root.formatBytes(root.snapshot.mem.swap_total) : "SWAP --"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+          PlainText { text: root.snapshot ? "PRESSURE " + Number(root.snapshot.mem.psi_some_10).toFixed(2) + " / " + Number(root.snapshot.mem.psi_some_60).toFixed(2) + " / " + Number(root.snapshot.mem.psi_some_300).toFixed(2) : "PRESSURE --"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
         }
 
         Column {
@@ -477,15 +477,15 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 5
-          Text { text: "FILESYSTEMS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: "FILESYSTEMS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
           Repeater {
             model: root.disks()
             delegate: Item {
               width: diskPage.width
               height: Style.space(34)
-              Text { width: Style.space(92); text: modelData.mount; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight }
+              PlainText { width: Style.space(92); text: modelData.mount; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter; elide: Text.ElideRight }
               Rectangle { x: Style.space(96); y: Style.space(7); width: parent.width - Style.space(150); height: Style.space(10); color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15); Rectangle { width: parent.width * root.percent(modelData.percent) / 100; height: parent.height; color: modelData.percent >= 90 ? Color.urgent : Color.accent } }
-              Text { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Number(modelData.percent).toFixed(0) + "%"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+              PlainText { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: Number(modelData.percent).toFixed(0) + "%"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
             }
           }
         }
@@ -495,17 +495,17 @@ Panel {
           anchors.fill: parent
           spacing: Style.space(8)
           visible: root.page === 6
-          Text { text: "COOLING / FANS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-          Text { text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "CPU " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "CPU TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
-          Text { text: root.fans().length > 0 ? "EVERY DETECTED COOLER" : "NO READABLE COOLERS"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
+          PlainText { text: "COOLING / FANS"; color: root.foreground; opacity: 0.65; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+          PlainText { text: root.snapshot && root.snapshot.cpu_temp_c !== null ? "CPU " + Number(root.snapshot.cpu_temp_c).toFixed(0) + "C" : "CPU TEMP --"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+          PlainText { text: root.fans().length > 0 ? "EVERY DETECTED COOLER" : "NO READABLE COOLERS"; color: root.foreground; opacity: 0.7; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall }
           Repeater {
             model: root.fans()
             delegate: Row {
               width: fanPage.width
               height: Style.space(22)
-              Text { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
-              Text { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter }
-              Text { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+              PlainText { width: root.tableMountWidth; text: modelData.label; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
+              PlainText { width: root.tableMetricWidth; text: modelData.rpm + " RPM"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; anchors.verticalCenter: parent.verticalCenter }
+              PlainText { width: root.tableMetricWidth; text: "[" + modelData.chip + "]"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
             }
           }
         }
@@ -531,7 +531,7 @@ Panel {
         border.color: root.foreground
         border.width: 1
         radius: Style.cornerRadius
-        Text { anchors.fill: parent; text: "OPEN FULL TUI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+        PlainText { anchors.fill: parent; text: "OPEN FULL TUI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.bodySmall; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
         MouseArea { anchors.fill: parent; onClicked: root.openTerminal() }
       }
     }

@@ -13,8 +13,8 @@ Column {
 
   spacing: Style.space(8)
 
-  Text { text: "GRAPHICS"; color: gpuPage.foreground; opacity: 0.65; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
-  Text { text: gpuPage.devices.length > 0 ? gpuPage.devices.length + " DETECTED GPU" + (gpuPage.devices.length === 1 ? "" : "S") : "NO READABLE GPUS"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
+  PlainText { text: "GRAPHICS"; color: gpuPage.foreground; opacity: 0.65; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+  PlainText { text: gpuPage.devices.length > 0 ? gpuPage.devices.length + " DETECTED GPU" + (gpuPage.devices.length === 1 ? "" : "S") : "NO READABLE GPUS"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.subtitle; font.bold: true }
 
   Repeater {
     model: gpuPage.devices
@@ -29,34 +29,34 @@ Column {
 
       Row {
         width: parent.width
-        Text { width: parent.width - Style.space(90); text: modelData.name + " [" + modelData.vendor + "]"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-        Text { width: Style.space(90); text: modelData.usage_percent === null ? "--" : Number(modelData.usage_percent).toFixed(0) + "%"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
+        PlainText { width: parent.width - Style.space(90); text: modelData.name + " [" + modelData.vendor + "]"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+        PlainText { width: Style.space(90); text: modelData.usage_percent === null ? "--" : Number(modelData.usage_percent).toFixed(0) + "%"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
       }
       Rectangle { width: parent.width; height: Style.space(10); color: Qt.rgba(gpuPage.foreground.r, gpuPage.foreground.g, gpuPage.foreground.b, 0.15); Rectangle { width: parent.width * gpuPage.percent(modelData.usage_percent) / 100; height: parent.height; color: Color.accent } }
-      Text { text: modelData.vendor === "Intel" ? "MEM shared RAM" : "VRAM " + (modelData.memory_used_bytes === null || modelData.memory_total_bytes === null ? "--" : gpuPage.formatBytes(modelData.memory_used_bytes) + " / " + gpuPage.formatBytes(modelData.memory_total_bytes)); color: gpuPage.foreground; opacity: 0.7; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall }
-      Text { text: "GPU PROCESSES"; color: gpuPage.foreground; opacity: 0.65; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+      PlainText { text: modelData.vendor === "Intel" ? "MEM shared RAM" : "VRAM " + (modelData.memory_used_bytes === null || modelData.memory_total_bytes === null ? "--" : gpuPage.formatBytes(modelData.memory_used_bytes) + " / " + gpuPage.formatBytes(modelData.memory_total_bytes)); color: gpuPage.foreground; opacity: 0.7; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall }
+      PlainText { text: "GPU PROCESSES"; color: gpuPage.foreground; opacity: 0.65; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
       Row {
         width: parent.width
         spacing: Style.space(8)
-        Text { width: parent.width - Style.space(354); text: "PROCESS"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
-        Text { width: Style.space(42); text: "GPU"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
-        Text { width: Style.space(42); text: "CPU"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
-        Text { width: Style.space(48); text: "RAM"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
-        Text { width: Style.space(190); text: "VRAM"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+        PlainText { width: parent.width - Style.space(354); text: "PROCESS"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+        PlainText { width: Style.space(42); text: "GPU"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+        PlainText { width: Style.space(42); text: "CPU"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+        PlainText { width: Style.space(48); text: "RAM"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
+        PlainText { width: Style.space(190); text: "VRAM"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.caption }
       }
       Repeater {
         model: deviceColumn.gpuProcesses
         delegate: Row {
           width: gpuPage.width
           spacing: Style.space(8)
-          Text { width: parent.width - Style.space(354); text: (modelData.process.user || "?") + "@" + gpuPage.processName(modelData.process.cmd, modelData.process.pid) + " [" + modelData.process.pid + "]"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
-          Text { width: Style.space(42); text: gpuPage.percentText(modelData.gpu.gpu_percent); color: Color.accent; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
-          Text { width: Style.space(42); text: gpuPage.percentText(modelData.process.cpu_percent); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
-          Text { width: Style.space(48); text: gpuPage.ramPercent(modelData.process.mem_bytes); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
-          Text { width: Style.space(190); text: gpuPage.formatBytes(modelData.gpu.memory_used_bytes); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
+          PlainText { width: parent.width - Style.space(354); text: (modelData.process.user || "?") + "@" + gpuPage.processName(modelData.process.cmd, modelData.process.pid) + " [" + modelData.process.pid + "]"; color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+          PlainText { width: Style.space(42); text: gpuPage.percentText(modelData.gpu.gpu_percent); color: Color.accent; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
+          PlainText { width: Style.space(42); text: gpuPage.percentText(modelData.process.cpu_percent); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
+          PlainText { width: Style.space(48); text: gpuPage.ramPercent(modelData.process.mem_bytes); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
+          PlainText { width: Style.space(190); text: gpuPage.formatBytes(modelData.gpu.memory_used_bytes); color: gpuPage.foreground; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall; horizontalAlignment: Text.AlignRight }
         }
       }
-      Text { visible: deviceColumn.gpuProcesses.length === 0; text: "no active GPU processes"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall }
+      PlainText { visible: deviceColumn.gpuProcesses.length === 0; text: "no active GPU processes"; color: gpuPage.foreground; opacity: 0.55; font.family: gpuPage.fontFamily; font.pixelSize: Style.font.bodySmall }
     }
   }
 
