@@ -11,9 +11,15 @@ Panel {
 
   property var anchorItem: null
   property var hostWidget: null
-  property var snapshot: null
+  property var snapshot: hostWidget ? hostWidget.snapshot : null
   property int page: 0
-  readonly property var pageNames: ["DASH", "CPU", "IO", "NET", "MEM", "DISKS", "FANS", "GPU"]
+  readonly property var pageNames: ["DASH", "CPU", "IO", "NET", "MEM", "DISKS", "FANS", "GPU", "HIST"]
+  property var historyBuffer: []
+  property int maxHistorySamples: 36000
+  property bool historyRecording: true
+
+  onSnapshotChanged: root.recordHistorySample()
+
   readonly property var barIdentity: hostWidget || root
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -173,11 +179,21 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: (typeof historyPageComp !== "undefined" && historyPageComp) ? historyPageComp.inputActiveFocus : false
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.switchPage(dx)
       }
       onCloseRequested: root.close()
       onTextKey: function(text) {
+        if (root.page === 8 && typeof historyPageComp !== "undefined" && historyPageComp) {
+          if (text === "," || text === "<") { historyPageComp.stepTimeline(-1); return }
+          if (text === "." || text === ">") { historyPageComp.stepTimeline(1); return }
+          if (text === "[" || text === "{") { historyPageComp.jumpTimeline(-1); return }
+          if (text === "]" || text === "}") { historyPageComp.jumpTimeline(1); return }
+          if (text === " ") { historyPageComp.togglePlayback(); return }
+          if (text === "0") { historyPageComp.jumpToLive(); return }
+          if (text === "r" || text === "R") { root.historyRecording = !root.historyRecording; return }
+        }
         if (text === "h" || text === "H") root.switchPage(-1)
         else if (text === "l" || text === "L") root.switchPage(1)
       }
@@ -235,7 +251,7 @@ Panel {
 
       Item {
         width: parent.width
-        height: Style.space(260)
+        height: root.page === 8 ? Style.space(340) : Style.space(260)
         clip: true
 
         Column {
@@ -522,6 +538,21 @@ Panel {
             fontFamily: root.fontFamily
           }
         }
+
+        Column {
+          anchors.fill: parent
+          visible: root.page === 8
+          HistoryPage {
+            id: historyPageComp
+            width: parent.width
+            history: root.historyBuffer
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            isRecording: root.historyRecording
+            onToggleRecordingRequested: root.historyRecording = !root.historyRecording
+            onRequestCapacity: function(samples) { root.ensureHistoryCapacity(samples) }
+          }
+        }
       }
 
       Rectangle {
@@ -561,5 +592,119 @@ Panel {
 
   function totalWrite() {
     return root.totalDeviceRate("write_bps")
+  }
+
+  function recordHistorySample() {
+    if (!root.historyRecording || !root.snapshot) return
+    var now = new Date()
+    var timeStr = ("0" + now.getHours()).slice(-2) + ":" +
+                  ("0" + now.getMinutes()).slice(-2) + ":" +
+                  ("0" + now.getSeconds()).slice(-2)
+
+    var memPct = (root.snapshot.total_mem_bytes > 0)
+      ? root.percent(root.snapshot.used_mem_bytes * 100 / root.snapshot.total_mem_bytes)
+      : 0
+
+    var gpuPct = 0
+    var gpuProcs = []
+    if (root.snapshot.gpu && root.snapshot.gpu.devices && root.snapshot.gpu.devices.length > 0) {
+      if (root.snapshot.gpu.devices[0].usage_percent !== null) {
+        gpuPct = Number(root.snapshot.gpu.devices[0].usage_percent) || 0
+      }
+      for (var d = 0; d < root.snapshot.gpu.devices.length; d++) {
+        var dev = root.snapshot.gpu.devices[d]
+        if (dev.processes) {
+          for (var gp = 0; gp < dev.processes.length; gp++) {
+            var g = dev.processes[gp]
+            gpuProcs.push({
+              pid: g.pid,
+              gpu_percent: Number(g.gpu_percent) || 0,
+              vram_bytes: Number(g.memory_used_bytes) || 0
+            })
+          }
+        }
+      }
+    }
+
+    var readRate = root.totalRead()
+    var writeRate = root.totalWrite()
+    var ioMb = (readRate + writeRate) / 1048576
+
+    var procs = []
+    if (root.snapshot.processes) {
+      var raw = root.snapshot.processes
+      for (var i = 0; i < Math.min(raw.length, 30); i++) {
+        var p = raw[i]
+        var gpuMatch = null
+        for (var gi = 0; gi < gpuProcs.length; gi++) {
+          if (gpuProcs[gi].pid === p.pid) {
+            gpuMatch = gpuProcs[gi]
+            break
+          }
+        }
+        procs.push({
+          pid: p.pid,
+          name: p.name || "",
+          cmd: p.cmd || "",
+          cpu_percent: Number(p.cpu_percent) || 0,
+          mem_bytes: Number(p.mem_bytes) || 0,
+          user: p.user || "",
+          read_bps: Number(p.read_bps) || 0,
+          write_bps: Number(p.write_bps) || 0,
+          gpu_percent: gpuMatch ? gpuMatch.gpu_percent : 0,
+          vram_bytes: gpuMatch ? gpuMatch.vram_bytes : 0
+        })
+      }
+    }
+
+    for (var g2 = 0; g2 < gpuProcs.length; g2++) {
+      var gpItem = gpuProcs[g2]
+      var alreadyIn = false
+      for (var pi = 0; pi < procs.length; pi++) {
+        if (procs[pi].pid === gpItem.pid) {
+          alreadyIn = true
+          break
+        }
+      }
+      if (!alreadyIn) {
+        procs.push({
+          pid: gpItem.pid,
+          name: "",
+          cmd: "",
+          cpu_percent: 0,
+          mem_bytes: 0,
+          user: "",
+          read_bps: 0,
+          write_bps: 0,
+          gpu_percent: gpItem.gpu_percent,
+          vram_bytes: gpItem.vram_bytes
+        })
+      }
+    }
+
+    var sample = {
+      timestamp: timeStr,
+      cpu: Math.round(Number(root.snapshot.overall_percent) || 0),
+      mem: Math.round(memPct),
+      io_mb: ioMb,
+      gpu: Math.round(gpuPct),
+      read_bps: readRate,
+      write_bps: writeRate,
+      processes: procs
+    }
+
+    var buf = root.historyBuffer.slice()
+    buf.push(sample)
+    if (buf.length > root.maxHistorySamples) {
+      buf.shift()
+    }
+    root.historyBuffer = buf
+  }
+
+  function ensureHistoryCapacity(needed) {
+    var minCapacity = Math.max(3600, Math.min(604800, Number(needed) || 36000))
+    if (minCapacity > root.maxHistorySamples) {
+      root.maxHistorySamples = minCapacity
+    }
   }
 }
