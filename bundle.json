@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
   "pluginId": "vitor.perfo",
-  "version": "0.1.2",
-  "target": "x86_64-unknown-linux-gnu",
+  "version": "0.1.3",
+  "target": "x86_64-unknown-linux-musl",
   "omarchyContract": 1,
-  "sourceCommit": "361429faad5dd37b431b5227fe8ac5a53fdabafa",
-  "buildRun": "https://github.com/VitorHolandaI/perfo-src/actions/runs/local",
+  "sourceCommit": "6387a60a906a573c462f697d731c8e25e25f4ca3",
+  "buildRun": "https://github.com/VitorHolandaI/perfo-src/actions/runs/34634790862",
   "files": [
     {
       "path": "BarWidget.qml",
-      "sha256": "11e6fa386fd169e6c6222ab309acae6a2804ac15ac775988ee2083940b8e02d4",
-      "size": 3484,
+      "sha256": "4e0ff1fe10ad9ef55fca32f2c4f193dbcbe11239f1ac651c9b80ef465ce97991",
+      "size": 11550,
       "mode": "0644"
     },
     {
       "path": "Panel.qml",
-      "sha256": "115956b4a66e8c83286ba1fa1eb3bdc79735b2f74ff89f9d25052a256f2441e0",
-      "size": 29482,
+      "sha256": "d76a84b774f9f7e74074a3e6e082fdfa34a4a9c4057a90267c69ec6143244278",
+      "size": 46622,
       "mode": "0644"
     },
     {
@@ -27,8 +27,14 @@
     },
     {
       "path": "GpuPage.qml",
-      "sha256": "8fb183ebab21841f98ea14cf5db55b246a41772997dd3f075845fe9c15e4ea5b",
-      "size": 7089,
+      "sha256": "52e635aa6e7ae5838889f3bd256fa1c460645eb9e68e4e46818823ccca0a5593",
+      "size": 9108,
+      "mode": "0644"
+    },
+    {
+      "path": "HistoryPage.qml",
+      "sha256": "f6a53d1d830795819a651fcb4189c44facc828a9ca407516981c2799da1bb8b8",
+      "size": 102363,
       "mode": "0644"
     },
     {
@@ -39,8 +45,8 @@
     },
     {
       "path": "manifest.json",
-      "sha256": "b07533dfade48785ac7ee83aeb3ef36ec2128a7ddc36dfa6b394e868ccae93ee",
-      "size": 475,
+      "sha256": "6590ba49a5ec84bb3f6f3cf49635e209cc864f7e4d0030e001dc87e6de631b89",
+      "size": 517,
       "mode": "0644"
     },
     {
@@ -63,8 +69,8 @@
     },
     {
       "path": "bin/perfo",
-      "sha256": "cab1ae13cf7f17d829970bdd59b277af96567470a3e8ff04480efd41c798f712",
-      "size": 1581456,
+      "sha256": "c9b7887cac8976cad560513b31957d4adda7e8762936c12c0f2a385e4b8df88e",
+      "size": 2151280,
       "mode": "0755"
     }
   ]
