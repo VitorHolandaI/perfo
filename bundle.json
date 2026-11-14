@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "pluginId": "vitor.perfo",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "target": "x86_64-unknown-linux-musl",
   "omarchyContract": 1,
-  "sourceCommit": "23d09c414f7c722b27b61b030f5c64bc34edde76",
-  "buildRun": "https://github.com/VitorHolandaI/perfo-src/actions/runs/43245149721",
+  "sourceCommit": "65e534d25dedf240b86c66005ba8fb1b2fe6609a",
+  "buildRun": "https://github.com/VitorHolandaI/perfo-src/actions/runs/43597352291",
   "files": [
     {
       "path": "BarWidget.qml",
@@ -33,8 +33,8 @@
     },
     {
       "path": "HistoryPage.qml",
-      "sha256": "6e4a2ef8d4c8d0d4f6d604ac821a730d01e171aba1d97f4872bbef9bbf0a391b",
-      "size": 105837,
+      "sha256": "a19df1e76ed783e548cb3a8a701c8c0e8336880c531505d98a1588d7eb7b34d9",
+      "size": 107850,
       "mode": "0644"
     },
     {
@@ -44,9 +44,21 @@
       "mode": "0644"
     },
     {
+      "path": "ProcessDeadline.qml",
+      "sha256": "56c021634704def5e9854841743634384f992588e6f0c936e48f55a6e43e5b6a",
+      "size": 1664,
+      "mode": "0644"
+    },
+    {
       "path": "manifest.json",
-      "sha256": "a906e661dd05a6f2e9af3763e3390dd34a722c3781ecb8944aec6e0d15164457",
+      "sha256": "41fc82dc658cd985a628f4856d8a4329b661d873d7b103634f0b56ee424d359f",
       "size": 517,
+      "mode": "0644"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "96d12bd42b065c796216e010a2f7d978d243154869d7a9a14e16f6c3b42de25f",
+      "size": 33936,
       "mode": "0644"
     },
     {
@@ -69,8 +81,8 @@
     },
     {
       "path": "bin/perfo",
-      "sha256": "5375745ea36ab83eba1d1adeebddff8e0f0332cf33c5a9c5e8ddc823ac5ac25b",
-      "size": 2278256,
+      "sha256": "4a47aa1bae9c4ef9e6736ecea83d3a165db821e41c446bfb0845d2a027f1a09f",
+      "size": 2282352,
       "mode": "0755"
     }
   ]
